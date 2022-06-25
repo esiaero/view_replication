@@ -3624,11 +3624,12 @@ RangeVarCallbackForRenameAttribute(const RangeVar *rv, Oid relid, Oid oldrelid,
  * The returned ObjectAddress is that of the renamed column.
  */
 ObjectAddress
-renameatt(RenameStmt *stmt)
+renameatt(ParseState *pstate, RenameStmt *stmt, bool isCompleteQuery)
 {
 	Oid			relid;
 	AttrNumber	attnum;
 	ObjectAddress address;
+	bool 		ddlxlog = XLogLogicalInfoActive() && isCompleteQuery;
 
 	/* lock level taken here should match renameatt_internal */
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
@@ -3643,6 +3644,17 @@ renameatt(RenameStmt *stmt)
 						stmt->relation->relname)));
 		return InvalidObjectAddress;
 	}
+
+	if (ddlxlog &&
+		ddl_need_xlog(relid, false))
+	{
+		const char* prefix = "";
+		LogLogicalDDLMessage(prefix,
+							 GetUserId(),
+							 pstate->p_sourcetext,
+							 strlen(pstate->p_sourcetext));
+	}
+
 
 	attnum =
 		renameatt_internal(relid,

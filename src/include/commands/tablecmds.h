@@ -70,7 +70,7 @@ extern bool CheckRelationTableSpaceMove(Relation rel, Oid newTableSpaceId);
 extern void SetRelationTableSpace(Relation rel, Oid newTableSpaceId,
 								  Oid newRelFileNode);
 
-extern ObjectAddress renameatt(RenameStmt *stmt);
+extern ObjectAddress renameatt(ParseState *pstate, RenameStmt *stmt, bool isCompleteQuery);
 
 extern ObjectAddress RenameConstraint(RenameStmt *stmt);
 

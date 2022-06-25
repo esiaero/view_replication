@@ -359,7 +359,7 @@ ExecRenameStmt(ParseState *pstate, RenameStmt *stmt,
 
 		case OBJECT_COLUMN:
 		case OBJECT_ATTRIBUTE:
-			return renameatt(stmt);
+			return renameatt(pstate, stmt, isCompleteQuery);
 
 		case OBJECT_RULE:
 			return RenameRewriteRule(stmt->relation, stmt->subname,
