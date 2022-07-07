@@ -1247,6 +1247,20 @@ LogLogicalDDLCommand(Node *parsetree, const char *queryString)
 					}
 					break;
 			}
+			break;
+		}
+		case T_RefreshMatViewStmt:
+		{
+			// RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) parsetree;
+			if (ddl_need_xlog(InvalidOid, true))
+			{
+				const char* prefix = "";
+				LogLogicalDDLMessage(prefix,
+									 GetUserId(),
+									 queryString,
+									 strlen(queryString));
+			}
+			break;
 		}
 		/*
 		 * Lastly, rule out DDLs we don't replicate yet in DDL replication
@@ -1266,7 +1280,6 @@ LogLogicalDDLCommand(Node *parsetree, const char *queryString)
 		case T_RuleStmt:
 		case T_CreateSeqStmt:
 		case T_AlterSeqStmt:
-		case T_RefreshMatViewStmt:
 		case T_CreatePLangStmt:
 		case T_CreateConversionStmt:
 		case T_CreateTransformStmt:
