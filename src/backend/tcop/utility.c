@@ -1251,7 +1251,7 @@ LogLogicalDDLCommand(Node *parsetree, const char *queryString)
 		}
 		case T_RefreshMatViewStmt:
 		{
-			// RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) parsetree;
+			/* RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) parsetree; */
 			if (ddl_need_xlog(InvalidOid, true))
 			{
 				const char* prefix = "";
