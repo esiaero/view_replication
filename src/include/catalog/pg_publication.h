@@ -61,6 +61,9 @@ CATALOG(pg_publication,6104,PublicationRelationId)
 
 	/* true if table level ddls are published */
 	bool		pubddl_table;
+
+	/* true if refreshes are published */
+	bool		pubrefresh;
 } FormData_pg_publication;
 
 /* ----------------
@@ -81,6 +84,7 @@ typedef struct PublicationActions
 	bool		pubtruncate;
 	bool		pubddl_database;
 	bool		pubddl_table;
+	bool		pubrefresh;
 } PublicationActions;
 
 typedef struct PublicationDesc
@@ -167,5 +171,6 @@ extern Bitmapset *pub_collist_to_bitmapset(Bitmapset *columns, Datum pubcols,
 extern Oid	get_publication_oid(const char *pubname, bool missing_ok);
 extern char *get_publication_name(Oid pubid, bool missing_ok);
 extern bool ddl_need_xlog(Oid relid, bool forAllTabPubOnly);
+extern bool refresh_need_xlog(Oid relid, bool forAllTabPubOnly);
 
 #endif							/* PG_PUBLICATION_H */

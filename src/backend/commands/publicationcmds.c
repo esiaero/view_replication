@@ -98,6 +98,7 @@ parse_publication_options(ParseState *pstate,
 	pubactions->pubupdate = true;
 	pubactions->pubdelete = true;
 	pubactions->pubtruncate = true;
+	pubactions->pubrefresh = false; /* consider setting to for_all_tables? */
 	*publish_via_partition_root = false;
 	if (for_all_tables)
 	{
@@ -132,6 +133,7 @@ parse_publication_options(ParseState *pstate,
 			pubactions->pubupdate = false;
 			pubactions->pubdelete = false;
 			pubactions->pubtruncate = false;
+			pubactions->pubrefresh = false; /* currently defaults to false */
 
 			*publish_given = true;
 			publish = defGetString(defel);
@@ -154,6 +156,8 @@ parse_publication_options(ParseState *pstate,
 					pubactions->pubdelete = true;
 				else if (strcmp(publish_opt, "truncate") == 0)
 					pubactions->pubtruncate = true;
+				else if (strcmp(publish_opt, "refresh") == 0)
+					pubactions->pubrefresh = true;
 				else
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
@@ -891,6 +895,8 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 		BoolGetDatum(pubactions.pubddl_database);
 	values[Anum_pg_publication_pubddl_table - 1] =
 		BoolGetDatum(pubactions.pubddl_table);
+	values[Anum_pg_publication_pubrefresh - 1] =
+		BoolGetDatum(pubactions.pubrefresh);
 
 	tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -1096,6 +1102,9 @@ AlterPublicationOptions(ParseState *pstate, AlterPublicationStmt *stmt,
 
 		values[Anum_pg_publication_pubtruncate - 1] = BoolGetDatum(pubactions.pubtruncate);
 		replaces[Anum_pg_publication_pubtruncate - 1] = true;
+
+		values[Anum_pg_publication_pubrefresh - 1] = BoolGetDatum(pubactions.pubrefresh);
+		replaces[Anum_pg_publication_pubrefresh - 1] = true;
 	}
 
 	if (ddl_level_given)

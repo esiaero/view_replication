@@ -1008,6 +1008,7 @@ GetPublication(Oid pubid)
 	pub->pubviaroot = pubform->pubviaroot;
 	pub->pubactions.pubddl_database = pubform->pubddl_database;
 	pub->pubactions.pubddl_table = pubform->pubddl_table;
+	pub->pubactions.pubrefresh = pubform->pubrefresh;
 
 	ReleaseSysCache(tup);
 
@@ -1250,6 +1251,46 @@ ddl_need_xlog(Oid relid, bool forAllTabPubOnly)
 		Publication *pub = GetPublication(pubid);
 
 		if (pub->pubactions.pubddl_table)
+			return true;
+	}
+
+	return false;
+}
+
+
+/*
+ * Analogous command to above to see if refresh should be logged; consider merging the methods?
+ */
+bool
+refresh_need_xlog(Oid relid, bool forAllTabPubOnly)
+{
+	List *allTablePubs = NIL;
+	List *tablePubs = NIL;
+	ListCell *lc;
+
+	if (relid == InvalidOid && !forAllTabPubOnly)
+		return false;
+
+	allTablePubs = GetAllTablesPublications();
+	foreach(lc, allTablePubs)
+	{
+		Oid pubid = lfirst_oid(lc);
+		Publication *pub = GetPublication(pubid);
+
+		if (pub->pubactions.pubddl_database && pub->pubactions.pubrefresh)
+			return true;
+	}
+	
+	if (forAllTabPubOnly)
+		return false;
+
+	tablePubs = GetRelationPublications(relid);
+	foreach(lc, tablePubs)
+	{
+		Oid pubid = lfirst_oid(lc);
+		Publication *pub = GetPublication(pubid);
+
+		if (pub->pubactions.pubddl_table && pub->pubactions.pubrefresh)
 			return true;
 	}
 

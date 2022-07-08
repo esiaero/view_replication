@@ -1767,9 +1767,26 @@ pgoutput_ddlmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	foreach(lc, data->publications)
 	{
 		Publication *pub = (Publication *) lfirst(lc);
+		List* parsetree_list; /* temp. added for refresh */
+		ListCell* parsetree_item; /* temp. added for refresh */
 		/* TODO need to check relid for table level DDLs */
 		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
 			return;
+
+		/* Temp. check here, until DDL rep. finalizes changes from deparser?
+		 * Note this solution requires a wait_for_catchup to isolate REFRESH msgs, 
+		 * otherwise the whole message is discarded.
+		 * Alternatively an entirely separate line of logic for logging REFRESH 
+		 * can be written out?
+		 */
+		parsetree_list = pg_parse_query(message);
+		foreach(parsetree_item, parsetree_list)
+		{
+			RawStmt *command = (RawStmt *) lfirst(parsetree_item);
+			if (nodeTag(command->stmt) == T_RefreshMatViewStmt &&
+				!pub->pubactions.pubrefresh)
+				return;
+		}
 	}
 
 	/*
@@ -2088,7 +2105,8 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 		entry->pubactions.pubinsert = entry->pubactions.pubupdate =
 			entry->pubactions.pubdelete = entry->pubactions.pubtruncate =
 			entry->pubactions.pubddl_database =
-			entry->pubactions.pubddl_table = false;
+			entry->pubactions.pubddl_table = 
+			entry->pubactions.pubrefresh = false;
 		entry->new_slot = NULL;
 		entry->old_slot = NULL;
 		memset(entry->exprstate, 0, sizeof(entry->exprstate));
@@ -2148,6 +2166,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 		entry->pubactions.pubtruncate = false;
 		entry->pubactions.pubddl_database = false;
 		entry->pubactions.pubddl_table = false;
+		entry->pubactions.pubrefresh = false;
 
 		/*
 		 * Tuple slots cleanups. (Will be rebuilt later if needed).
@@ -2263,6 +2282,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 				entry->pubactions.pubtruncate |= pub->pubactions.pubtruncate;
 				entry->pubactions.pubddl_database |= pub->pubactions.pubddl_database;
 				entry->pubactions.pubddl_table |= pub->pubactions.pubddl_table;
+				entry->pubactions.pubrefresh |= pub->pubactions.pubrefresh;
 
 				/*
 				 * We want to publish the changes as the top-most ancestor

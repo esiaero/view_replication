@@ -622,6 +622,7 @@ typedef struct _PublicationInfo
 	bool		pubviaroot;
 	bool		pubddl_database;
 	bool		pubddl_table;
+	bool		pubrefresh;
 } PublicationInfo;
 
 /*
