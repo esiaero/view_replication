@@ -101,6 +101,18 @@ typedef void (*LogicalDecodeDDLMessageCB) (struct LogicalDecodingContext *ctx,
 										   const char *message);
 
 /*
+ * Called for the logical decoding REFRESH messages.
+ */
+typedef void (*LogicalDecodeREFRESHMessageCB) (struct LogicalDecodingContext *ctx,
+										   ReorderBufferTXN *txn,
+										   XLogRecPtr message_lsn,
+										   const char *prefix,
+										   const char *role,
+										   const char *search_path,
+										   Size message_size,
+										   const char *message);
+
+/*
  * Filter changes by origin.
  */
 typedef bool (*LogicalDecodeFilterByOriginCB) (struct LogicalDecodingContext *ctx,
@@ -225,6 +237,19 @@ typedef void (*LogicalDecodeStreamDDLMessageCB) (struct LogicalDecodingContext *
 												 const char *message);
 
 /*
+ * Callback for streaming logical decoding REFRESH messages from in-progress
+ * transactions.
+ */
+typedef void (*LogicalDecodeStreamREFRESHMessageCB) (struct LogicalDecodingContext *ctx,
+												 ReorderBufferTXN *txn,
+												 XLogRecPtr message_lsn,
+												 const char *prefix,
+												 const char *role,
+												 const char *search_path,
+												 Size message_size,
+												 const char *message);
+
+/*
  * Callback for streaming truncates from in-progress transactions.
  */
 typedef void (*LogicalDecodeStreamTruncateCB) (struct LogicalDecodingContext *ctx,
@@ -245,6 +270,7 @@ typedef struct OutputPluginCallbacks
 	LogicalDecodeCommitCB commit_cb;
 	LogicalDecodeMessageCB message_cb;
 	LogicalDecodeDDLMessageCB ddlmessage_cb;
+	LogicalDecodeREFRESHMessageCB refreshmessage_cb;
 	LogicalDecodeFilterByOriginCB filter_by_origin_cb;
 	LogicalDecodeShutdownCB shutdown_cb;
 
@@ -264,6 +290,7 @@ typedef struct OutputPluginCallbacks
 	LogicalDecodeStreamChangeCB stream_change_cb;
 	LogicalDecodeStreamMessageCB stream_message_cb;
 	LogicalDecodeStreamDDLMessageCB stream_ddlmessage_cb;
+	LogicalDecodeStreamREFRESHMessageCB stream_refreshmessage_cb;
 	LogicalDecodeStreamTruncateCB stream_truncate_cb;
 } OutputPluginCallbacks;
 

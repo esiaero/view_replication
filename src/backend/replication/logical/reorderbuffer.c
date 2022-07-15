@@ -526,6 +526,20 @@ ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change,
 				pfree(change->data.ddlmsg.message);
 			change->data.ddlmsg.message = NULL;
 			break;
+		case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
+			if (change->data.refreshmsg.prefix != NULL)
+				pfree(change->data.refreshmsg.prefix);
+			change->data.refreshmsg.prefix = NULL;
+			if (change->data.refreshmsg.role != NULL)
+				pfree(change->data.refreshmsg.role);
+			change->data.refreshmsg.role = NULL;
+			if (change->data.refreshmsg.search_path != NULL)
+				pfree(change->data.refreshmsg.search_path);
+			change->data.refreshmsg.search_path = NULL;
+			if (change->data.refreshmsg.message != NULL)
+				pfree(change->data.refreshmsg.message);
+			change->data.refreshmsg.message = NULL;
+			break;
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
 			if (change->data.inval.invalidations)
 				pfree(change->data.inval.invalidations);
@@ -904,6 +918,36 @@ ReorderBufferQueueDDLMessage(ReorderBuffer *rb, TransactionId xid,
 	change->data.ddlmsg.message_size = message_size;
 	change->data.ddlmsg.message = palloc(message_size);
 	memcpy(change->data.ddlmsg.message, message, message_size);
+
+	ReorderBufferQueueChange(rb, xid, lsn, change, false);
+
+	MemoryContextSwitchTo(oldcontext);
+}
+
+/*
+ * A transactional REFRESH message is queued to be processed upon commit
+ */
+void
+ReorderBufferQueueREFRESHMessage(ReorderBuffer *rb, TransactionId xid,
+						  XLogRecPtr lsn, const char *prefix,
+						  const char *role, const char *search_path,
+						  Size message_size, const char *message)
+{
+	MemoryContext oldcontext;
+	ReorderBufferChange *change;
+
+	Assert(xid != InvalidTransactionId);
+
+	oldcontext = MemoryContextSwitchTo(rb->context);
+
+	change = ReorderBufferGetChange(rb);
+	change->action = REORDER_BUFFER_CHANGE_REFRESHMESSAGE;
+	change->data.refreshmsg.prefix = pstrdup(prefix);
+	change->data.refreshmsg.role = pstrdup(role);
+	change->data.refreshmsg.search_path = pstrdup(search_path);
+	change->data.refreshmsg.message_size = message_size;
+	change->data.refreshmsg.message = palloc(message_size);
+	memcpy(change->data.refreshmsg.message, message, message_size);
 
 	ReorderBufferQueueChange(rb, xid, lsn, change, false);
 
@@ -2025,6 +2069,29 @@ ReorderBufferApplyDDLMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
 }
 
 /*
+ * Helper function for ReorderBufferProcessTXN for applying the REFRESH message.
+ */
+static inline void
+ReorderBufferApplyREFRESHMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
+							 ReorderBufferChange *change, bool streaming)
+{
+	if (streaming)
+		rb->stream_refreshmessage(rb, txn, change->lsn,
+							  change->data.refreshmsg.prefix,
+							  change->data.refreshmsg.role,
+							  change->data.refreshmsg.search_path,
+							  change->data.refreshmsg.message_size,
+							  change->data.refreshmsg.message);
+	else
+		rb->refreshmessage(rb, txn, change->lsn,
+					   change->data.refreshmsg.prefix,
+					   change->data.refreshmsg.role,
+					   change->data.refreshmsg.search_path,
+					   change->data.refreshmsg.message_size,
+					   change->data.refreshmsg.message);
+}
+
+/*
  * Function to store the command id and snapshot at the end of the current
  * stream so that we can reuse the same while sending the next stream.
  */
@@ -2404,6 +2471,10 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 				case REORDER_BUFFER_CHANGE_DDLMESSAGE:
 					ReorderBufferApplyDDLMessage(rb, txn, change, streaming);
+					break;
+
+				case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
+					ReorderBufferApplyREFRESHMessage(rb, txn, change, streaming);
 					break;
 
 				case REORDER_BUFFER_CHANGE_INVALIDATION:
@@ -3828,6 +3899,53 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 				break;
 			}
+		case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
+			{
+				char	   *data;
+				Size		prefix_size = strlen(change->data.refreshmsg.prefix) + 1;
+				Size		role_size = strlen(change->data.refreshmsg.role) + 1;
+				Size		search_path_size = strlen(change->data.refreshmsg.search_path) + 1;
+
+				sz += prefix_size + role_size + search_path_size +
+					  change->data.refreshmsg.message_size +
+					  sizeof(Size) + sizeof(Size) + sizeof(Size) + sizeof(Size);
+				ReorderBufferSerializeReserve(rb, sz);
+
+				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
+
+				/* might have been reallocated above */
+				ondisk = (ReorderBufferDiskChange *) rb->outbuf;
+
+				/* write the prefix including the size */
+				memcpy(data, &prefix_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshmsg.prefix,
+					   prefix_size);
+				data += prefix_size;
+
+				/* write the role including the size */
+				memcpy(data, &role_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshmsg.role,
+					   role_size);
+				data += role_size;
+
+				/* write the search_path including the size */
+				memcpy(data, &search_path_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshmsg.search_path,
+					   search_path_size);
+				data += search_path_size;
+
+				/* write the message including the size */
+				memcpy(data, &change->data.refreshmsg.message_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshmsg.message,
+					   change->data.refreshmsg.message_size);
+				data += change->data.refreshmsg.message_size;
+
+				break;
+			}
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
 			{
 				char	   *data;
@@ -4154,6 +4272,18 @@ ReorderBufferChangeSize(ReorderBufferChange *change)
 
 				break;
 			}
+		case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
+			{
+				Size		prefix_size = strlen(change->data.refreshmsg.prefix) + 1;
+				Size		role_size = strlen(change->data.refreshmsg.role) + 1;
+				Size		search_path_size = strlen(change->data.refreshmsg.search_path) + 1;
+
+				sz += prefix_size + role_size + search_path_size +
+					change->data.refreshmsg.message_size +
+					sizeof(Size) + sizeof(Size) + sizeof(Size) + sizeof(Size);
+
+				break;
+			}
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
 			{
 				sz += sizeof(SharedInvalidationMessage) *
@@ -4458,6 +4588,49 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 																	 search_path_size);
 				memcpy(change->data.ddlmsg.search_path, data, search_path_size);
 				Assert(change->data.ddlmsg.search_path[search_path_size - 1] == '\0');
+				data += search_path_size;
+
+				/* read the message */
+				memcpy(&change->data.msg.message_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.msg.message = MemoryContextAlloc(rb->context,
+															  change->data.msg.message_size);
+				memcpy(change->data.msg.message, data,
+					   change->data.msg.message_size);
+				data += change->data.msg.message_size;
+
+				break;
+			}
+		case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
+			{
+				Size		prefix_size;
+				Size		role_size;
+				Size		search_path_size;
+
+				/* read prefix */
+				memcpy(&prefix_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.refreshmsg.prefix = MemoryContextAlloc(rb->context, prefix_size);
+				memcpy(change->data.refreshmsg.prefix, data, prefix_size);
+				Assert(change->data.refreshmsg.prefix[prefix_size - 1] == '\0');
+				data += prefix_size;
+
+				/* read role */
+				memcpy(&role_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.refreshmsg.role = MemoryContextAlloc(rb->context,
+															  role_size);
+				memcpy(change->data.refreshmsg.role, data, role_size);
+				Assert(change->data.refreshmsg.role[role_size - 1] == '\0');
+				data += role_size;
+
+				/* read search_path */
+				memcpy(&search_path_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.refreshmsg.search_path = MemoryContextAlloc(rb->context,
+																	 search_path_size);
+				memcpy(change->data.refreshmsg.search_path, data, search_path_size);
+				Assert(change->data.refreshmsg.search_path[search_path_size - 1] == '\0');
 				data += search_path_size;
 
 				/* read the message */

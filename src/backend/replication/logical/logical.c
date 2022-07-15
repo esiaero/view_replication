@@ -77,6 +77,10 @@ static void ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 								  XLogRecPtr message_lsn, const char *prefix,
 								  const char *role, const char *search_path,
 								  Size message_size, const char *message);
+static void refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+								  XLogRecPtr message_lsn, const char *prefix,
+								  const char *role, const char *search_path,
+								  Size message_size, const char *message);
 
 /* streaming callbacks */
 static void stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
@@ -95,6 +99,10 @@ static void stream_message_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *tx
 									  XLogRecPtr message_lsn, bool transactional,
 									  const char *prefix, Size message_size, const char *message);
 static void stream_ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+										 XLogRecPtr message_lsn, const char *prefix,
+										 const char *role, const char *search_path,
+										 Size message_size, const char *message);
+static void stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 										 XLogRecPtr message_lsn, const char *prefix,
 										 const char *role, const char *search_path,
 										 Size message_size, const char *message);
@@ -227,6 +235,7 @@ StartupDecodingContext(List *output_plugin_options,
 	ctx->reorder->commit = commit_cb_wrapper;
 	ctx->reorder->message = message_cb_wrapper;
 	ctx->reorder->ddlmessage = ddlmessage_cb_wrapper;
+	ctx->reorder->refreshmessage = refreshmessage_cb_wrapper;
 
 	/*
 	 * To support streaming, we require start/stop/abort/commit/change
@@ -244,6 +253,7 @@ StartupDecodingContext(List *output_plugin_options,
 		(ctx->callbacks.stream_change_cb != NULL) ||
 		(ctx->callbacks.stream_message_cb != NULL) ||
 		(ctx->callbacks.stream_ddlmessage_cb != NULL) ||
+		(ctx->callbacks.stream_refreshmessage_cb != NULL) || 
 		(ctx->callbacks.stream_truncate_cb != NULL);
 
 	/*
@@ -262,6 +272,7 @@ StartupDecodingContext(List *output_plugin_options,
 	ctx->reorder->stream_change = stream_change_cb_wrapper;
 	ctx->reorder->stream_message = stream_message_cb_wrapper;
 	ctx->reorder->stream_ddlmessage = stream_ddlmessage_cb_wrapper;
+	ctx->reorder->stream_refreshmessage = stream_refreshmessage_cb_wrapper;
 	ctx->reorder->stream_truncate = stream_truncate_cb_wrapper;
 
 
@@ -1269,6 +1280,43 @@ ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 }
 
 static void
+refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+					  XLogRecPtr message_lsn, const char *prefix,
+					  const char *role, const char *search_path,
+					  Size message_size, const char *message)
+{
+	LogicalDecodingContext *ctx = cache->private_data;
+	LogicalErrorCallbackState state;
+	ErrorContextCallback errcallback;
+
+	Assert(!ctx->fast_forward);
+
+	if (ctx->callbacks.refreshmessage_cb == NULL)
+		return;
+
+	/* Push callback + info on the error context stack */
+	state.ctx = ctx;
+	state.callback_name = "refreshmessage";
+	state.report_location = message_lsn;
+	errcallback.callback = output_plugin_error_callback;
+	errcallback.arg = (void *) &state;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
+	/* set output state */
+	ctx->accept_writes = true;
+	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+	ctx->write_location = message_lsn;
+
+	/* do the actual work: call callback */
+	ctx->callbacks.refreshmessage_cb(ctx, txn, message_lsn, prefix,
+								 role, search_path, message_size, message);
+
+	/* Pop the error context stack */
+	error_context_stack = errcallback.previous;
+}
+
+static void
 stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 						XLogRecPtr first_lsn)
 {
@@ -1618,6 +1666,47 @@ stream_ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 
 	/* do the actual work: call callback */
 	ctx->callbacks.stream_ddlmessage_cb(ctx, txn, message_lsn, prefix,
+										role, search_path, message_size, message);
+
+	/* Pop the error context stack */
+	error_context_stack = errcallback.previous;
+}
+
+static void
+stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+							 XLogRecPtr message_lsn, const char *prefix,
+							 const char *role, const char* search_path,
+							 Size message_size, const char *message)
+{
+	LogicalDecodingContext *ctx = cache->private_data;
+	LogicalErrorCallbackState state;
+	ErrorContextCallback errcallback;
+
+	Assert(!ctx->fast_forward);
+
+	/* We're only supposed to call this when streaming is supported. */
+	Assert(ctx->streaming);
+
+	/* this callback is optional */
+	if (ctx->callbacks.stream_refreshmessage_cb == NULL)
+		return;
+
+	/* Push callback + info on the error context stack */
+	state.ctx = ctx;
+	state.callback_name = "stream_refreshmessage";
+	state.report_location = message_lsn;
+	errcallback.callback = output_plugin_error_callback;
+	errcallback.arg = (void *) &state;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
+	/* set output state */
+	ctx->accept_writes = true;
+	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+	ctx->write_location = message_lsn;
+
+	/* do the actual work: call callback */
+	ctx->callbacks.stream_refreshmessage_cb(ctx, txn, message_lsn, prefix,
 										role, search_path, message_size, message);
 
 	/* Pop the error context stack */

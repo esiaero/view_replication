@@ -16,7 +16,8 @@ override CPPFLAGS := -I$(srcdir) $(CPPFLAGS)
 
 OBJS = \
 	decode.o \
-	ddlmessage.o\
+	ddlmessage.o \
+	refreshmessage.o \
 	launcher.o \
 	logical.o \
 	logicalfuncs.o \

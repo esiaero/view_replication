@@ -28,6 +28,7 @@
 #include "commands/tablespace.h"
 #include "replication/message.h"
 #include "replication/ddlmessage.h"
+#include "replication/refreshmessage.h"
 #include "replication/origin.h"
 #include "rmgrdesc.h"
 #include "storage/standbydefs.h"

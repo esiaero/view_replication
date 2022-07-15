@@ -65,7 +65,8 @@ typedef enum ReorderBufferChangeType
 	REORDER_BUFFER_CHANGE_INTERNAL_SPEC_INSERT,
 	REORDER_BUFFER_CHANGE_INTERNAL_SPEC_CONFIRM,
 	REORDER_BUFFER_CHANGE_INTERNAL_SPEC_ABORT,
-	REORDER_BUFFER_CHANGE_TRUNCATE
+	REORDER_BUFFER_CHANGE_TRUNCATE,
+	REORDER_BUFFER_CHANGE_REFRESHMESSAGE
 } ReorderBufferChangeType;
 
 /* forward declaration */
@@ -140,6 +141,16 @@ typedef struct ReorderBufferChange
 			Size		message_size;
 			char	   *message;
 		}			ddlmsg;
+
+				/* REFRESH Message. */
+		struct
+		{
+			char	   *prefix;
+			char	   *role;
+			char	   *search_path;
+			Size		message_size;
+			char	   *message;
+		}			refreshmsg;
 
 		/* New snapshot, set when action == *_INTERNAL_SNAPSHOT */
 		Snapshot	snapshot;
@@ -451,6 +462,16 @@ typedef void (*ReorderBufferDDLMessageCB) (ReorderBuffer *rb,
 										   Size sz,
 										   const char *message);
 
+/* REFRESH message callback signature */
+typedef void (*ReorderBufferREFRESHMessageCB) (ReorderBuffer *rb,
+										   ReorderBufferTXN *txn,
+										   XLogRecPtr message_lsn,
+										   const char *prefix,
+										   const char *role,
+										   const char *search_path,
+										   Size sz,
+										   const char *message);
+
 /* begin prepare callback signature */
 typedef void (*ReorderBufferBeginPrepareCB) (ReorderBuffer *rb,
 											 ReorderBufferTXN *txn);
@@ -528,6 +549,17 @@ typedef void (*ReorderBufferStreamDDLMessageCB) (
 												 Size sz,
 												 const char *message);
 
+/* stream REFRESH message callback signature */
+typedef void (*ReorderBufferStreamREFRESHMessageCB) (
+												 ReorderBuffer *rb,
+												 ReorderBufferTXN *txn,
+												 XLogRecPtr message_lsn,
+												 const char *prefix,
+												 const char *role,
+												 const char *search_path,
+												 Size sz,
+												 const char *message);
+
 /* stream truncate callback signature */
 typedef void (*ReorderBufferStreamTruncateCB) (
 											   ReorderBuffer *rb,
@@ -574,6 +606,7 @@ struct ReorderBuffer
 	ReorderBufferCommitCB commit;
 	ReorderBufferMessageCB message;
 	ReorderBufferDDLMessageCB ddlmessage;
+	ReorderBufferREFRESHMessageCB refreshmessage;
 
 	/*
 	 * Callbacks to be called when streaming a transaction at prepare time.
@@ -595,6 +628,7 @@ struct ReorderBuffer
 	ReorderBufferStreamMessageCB stream_message;
 	ReorderBufferStreamDDLMessageCB stream_ddlmessage;
 	ReorderBufferStreamTruncateCB stream_truncate;
+	ReorderBufferStreamREFRESHMessageCB stream_refreshmessage;
 
 	/*
 	 * Pointer that will be passed untouched to the callbacks.
@@ -670,6 +704,9 @@ extern void ReorderBufferQueueMessage(ReorderBuffer *, TransactionId, Snapshot s
 									  bool transactional, const char *prefix,
 									  Size message_size, const char *message);
 extern void ReorderBufferQueueDDLMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
+										const char *prefix, const char *role,
+										 const char *search_path, Size message_size, const char *message);
+extern void ReorderBufferQueueREFRESHMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
 										const char *prefix, const char *role,
 										 const char *search_path, Size message_size, const char *message);
 extern void ReorderBufferCommit(ReorderBuffer *, TransactionId,

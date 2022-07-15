@@ -37,6 +37,7 @@
 #include "catalog/pg_control.h"
 #include "replication/decode.h"
 #include "replication/ddlmessage.h"
+#include "replication/refreshmessage.h"
 #include "replication/logical.h"
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -637,6 +638,50 @@ logicalddlmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		return;
 
 	ReorderBufferQueueDDLMessage(ctx->reorder, xid, buf->endptr,
+							  message->message,
+							  /* first part of message is prefix */
+							  message->message + message->prefix_size,
+							  /* Second part of message is role*/
+							  message->message + message->prefix_size + message->role_size,
+							  /* Third part of message is search_path */
+							  message->message_size,
+							  message->message + message->prefix_size +
+							  message->role_size + message->search_path_size);
+}
+
+/*
+ * Handle rmgr LOGICALREFRESHMSG_ID records for DecodeRecordIntoReorderBuffer().
+ */
+void
+logicalrefreshmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
+{
+	SnapBuild  *builder = ctx->snapshot_builder;
+	XLogReaderState *r = buf->record;
+	TransactionId xid = XLogRecGetXid(r);
+	uint8		info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
+	RepOriginId origin_id = XLogRecGetOrigin(r);
+	xl_logical_refresh_message *message;
+
+	if (info != XLOG_LOGICAL_REFRESH_MESSAGE)
+		elog(ERROR, "unexpected RM_LOGICALREFRESHMSG_ID record type: %u", info);
+
+	ReorderBufferProcessXid(ctx->reorder, XLogRecGetXid(r), buf->origptr);
+
+	/*
+	 * If we don't have snapshot or we are just fast-forwarding, there is no
+	 * point in decoding refresh messages.
+	 */
+	if (SnapBuildCurrentState(builder) < SNAPBUILD_FULL_SNAPSHOT ||
+		ctx->fast_forward)
+		return;
+
+	message = (xl_logical_refresh_message *) XLogRecGetData(r);
+
+	if (message->dbId != ctx->slot->data.database ||
+		FilterByOrigin(ctx, origin_id))
+		return;
+
+	ReorderBufferQueueREFRESHMessage(ctx->reorder, xid, buf->endptr,
 							  message->message,
 							  /* first part of message is prefix */
 							  message->message + message->prefix_size,

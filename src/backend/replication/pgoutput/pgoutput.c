@@ -58,6 +58,10 @@ static void pgoutput_ddlmessage(LogicalDecodingContext *ctx,
 								ReorderBufferTXN *txn, XLogRecPtr message_lsn,
 								const char *prefix, const char *role,
 								const char *search_path, Size sz, const char *message);
+static void pgoutput_refreshmessage(LogicalDecodingContext *ctx,
+								ReorderBufferTXN *txn, XLogRecPtr message_lsn,
+								const char *prefix, const char *role,
+								const char *search_path, Size sz, const char *message);
 static bool pgoutput_origin_filter(LogicalDecodingContext *ctx,
 								   RepOriginId origin_id);
 static void pgoutput_begin_prepare_txn(LogicalDecodingContext *ctx,
@@ -261,6 +265,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->truncate_cb = pgoutput_truncate;
 	cb->message_cb = pgoutput_message;
 	cb->ddlmessage_cb = pgoutput_ddlmessage;
+	cb->refreshmessage_cb = pgoutput_refreshmessage;
 	cb->commit_cb = pgoutput_commit_txn;
 
 	cb->begin_prepare_cb = pgoutput_begin_prepare_txn;
@@ -278,6 +283,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->stream_change_cb = pgoutput_change;
 	cb->stream_message_cb = pgoutput_message;
 	cb->stream_ddlmessage_cb = pgoutput_ddlmessage;
+	cb->stream_refreshmessage_cb = pgoutput_refreshmessage;
 	cb->stream_truncate_cb = pgoutput_truncate;
 	/* transaction streaming - two-phase commit */
 	cb->stream_prepare_cb = pgoutput_stream_prepare_txn;
@@ -1808,6 +1814,84 @@ pgoutput_ddlmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	OutputPluginPrepareWrite(ctx, true);
 	logicalrep_write_ddlmessage(ctx->out,
+							 xid,
+							 message_lsn,
+							 prefix,
+							 role,
+							 search_path,
+							 sz,
+							 message);
+	OutputPluginWrite(ctx, true);
+}
+
+static void
+pgoutput_refreshmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
+				 XLogRecPtr message_lsn,
+				 const char *prefix, const char * role,
+				 const char *search_path, Size sz, const char *message)
+{
+	PGOutputData *data = (PGOutputData *) ctx->output_plugin_private;
+	TransactionId xid = InvalidTransactionId;
+	ListCell *lc;
+	PGOutputTxnData *txndata;
+
+	/* Reload publications if needed before use. */
+	if (!publications_valid)
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(CacheMemoryContext);
+		if (data->publications)
+			list_free_deep(data->publications);
+
+		data->publications = LoadPublications(data->publication_names);
+		MemoryContextSwitchTo(oldctx);
+		publications_valid = true;
+	}
+
+	/* Check if refresh replication is turned on for the publications */
+	foreach(lc, data->publications)
+	{
+		Publication *pub = (Publication *) lfirst(lc);
+		List* parsetree_list; /* temp. added for refresh */
+		ListCell* parsetree_item; /* temp. added for refresh */
+		/* TODO need to check relid for table level REFRESHes */
+		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
+			return;
+
+		/* Temp. check here, until REFRESH rep. finalizes changes from deparser?
+		 * Note this solution requires a wait_for_catchup to isolate REFRESH msgs, 
+		 * otherwise the whole message is discarded.
+		 * Alternatively an entirely separate line of logic for logging REFRESH 
+		 * can be written out?
+		 */
+		parsetree_list = pg_parse_query(message);
+		foreach(parsetree_item, parsetree_list)
+		{
+			RawStmt *command = (RawStmt *) lfirst(parsetree_item);
+			if (nodeTag(command->stmt) == T_RefreshMatViewStmt &&
+				!pub->pubactions.pubrefresh)
+				return;
+		}
+	}
+
+	/*
+	 * Remember the xid for the message in streaming mode. See
+	 * pgoutput_change.
+	 */
+	if (in_streaming)
+		xid = txn->xid;
+
+	/*
+	 * Output BEGIN if we haven't yet. Avoid for non-transactional
+	 * messages.
+	 */
+	txndata = (PGOutputTxnData *) txn->output_plugin_private;
+
+	/* Send BEGIN if we haven't yet */
+	if (txndata && !txndata->sent_begin_txn)
+		pgoutput_send_begin(ctx, txn);
+
+	OutputPluginPrepareWrite(ctx, true);
+	logicalrep_write_refreshmessage(ctx->out,
 							 xid,
 							 message_lsn,
 							 prefix,

@@ -20,6 +20,7 @@ OBJS = \
 	heapdesc.o \
 	logicalmsgdesc.o \
 	logicalddlmsgdesc.o \
+	logicalrefreshmsgdesc.o \
 	mxactdesc.o \
 	nbtdesc.o \
 	relmapdesc.o \

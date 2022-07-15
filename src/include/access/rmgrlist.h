@@ -48,3 +48,4 @@ PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc,
 PG_RMGR(RM_GENERIC_ID, "Generic", generic_redo, generic_desc, generic_identify, NULL, NULL, generic_mask, NULL)
 PG_RMGR(RM_LOGICALMSG_ID, "LogicalMessage", logicalmsg_redo, logicalmsg_desc, logicalmsg_identify, NULL, NULL, NULL, logicalmsg_decode)
 PG_RMGR(RM_LOGICALDDLMSG_ID, "LogicalDDLMessage", logicalddlmsg_redo, logicalddlmsg_desc, logicalddlmsg_identify, NULL, NULL, NULL, logicalddlmsg_decode)
+PG_RMGR(RM_LOGICALREFRESHMSG_ID, "LogicalREFRESHMessage", logicalrefreshmsg_redo, logicalrefreshmsg_desc, logicalrefreshmsg_identify, NULL, NULL, NULL, logicalrefreshmsg_decode)
