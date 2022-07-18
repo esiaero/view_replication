@@ -689,6 +689,7 @@ logicalrefreshmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							  message->message + message->prefix_size + message->role_size,
 							  /* Third part of message is search_path */
 							  message->message_size,
+							  message->matviewId,
 							  message->message + message->prefix_size +
 							  message->role_size + message->search_path_size);
 }

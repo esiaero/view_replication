@@ -36,6 +36,7 @@
 #include "miscadmin.h"
 #include "parser/parse_relation.h"
 #include "pgstat.h"
+#include "replication/refreshmessage.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
@@ -136,7 +137,8 @@ SetMatViewPopulatedState(Relation relation, bool newstate)
  */
 ObjectAddress
 ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
-				   ParamListInfo params, QueryCompletion *qc)
+				   ParamListInfo params, QueryCompletion *qc,
+				   ParseState *pstate, bool isCompleteQuery)
 {
 	Oid			matviewOid;
 	Relation	matviewRel;
@@ -168,6 +170,19 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 										  RangeVarCallbackOwnsTable, NULL);
 	matviewRel = table_open(matviewOid, NoLock);
 	relowner = matviewRel->rd_rel->relowner;
+
+
+	if (XLogLogicalInfoActive() &&
+		isCompleteQuery &&
+		refresh_need_xlog(matviewOid, true))
+	{
+		const char* prefix = "";
+		LogLogicalRefreshMessage(prefix, /* todo: make this rel? */
+							 GetUserId(),
+							 pstate->p_sourcetext,
+							 strlen(pstate->p_sourcetext),
+							 matviewOid);
+	}
 
 	/*
 	 * Switch to the owner's userid, so that any functions are run as that

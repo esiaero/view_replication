@@ -1249,19 +1249,7 @@ LogLogicalDDLCommand(Node *parsetree, const char *queryString)
 			}
 			break;
 		}
-		case T_RefreshMatViewStmt:
-		{
-			/* RefreshMatViewStmt *stmt = (RefreshMatViewStmt *) parsetree; */
-			if (refresh_need_xlog(InvalidOid, true))
-			{
-				const char* prefix = "";
-				LogLogicalDDLMessage(prefix,
-									 GetUserId(),
-									 queryString,
-									 strlen(queryString));
-			}
-			break;
-		}
+		case T_RefreshMatViewStmt: /* Handled in ExecRefreshMatView */
 		/*
 		 * Lastly, rule out DDLs we don't replicate yet in DDL replication
 		 * Some of these can be supported, we just need to investigate and run tests.
@@ -1944,7 +1932,8 @@ ProcessUtilitySlow(ParseState *pstate,
 				PG_TRY();
 				{
 					address = ExecRefreshMatView((RefreshMatViewStmt *) parsetree,
-												 queryString, params, qc);
+												 queryString, params, qc,
+												 pstate, isCompleteQuery);
 				}
 				PG_FINALLY();
 				{

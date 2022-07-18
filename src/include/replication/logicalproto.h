@@ -239,12 +239,6 @@ extern void logicalrep_write_ddlmessage(StringInfo out, TransactionId xid, XLogR
 extern const char *logicalrep_read_ddlmessage(StringInfo in, XLogRecPtr *lsn, const char **prefix,
 											  const char **role, const char **search_path,
 											  Size *sz);
-extern void logicalrep_write_refreshmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
-										const char *prefix, const char *role,
-										const char *search_path, Size sz, const char *message);
-extern const char *logicalrep_read_refreshmessage(StringInfo in, XLogRecPtr *lsn, const char **prefix,
-											  const char **role, const char **search_path,
-											  Size *sz);
 extern void logicalrep_write_rel(StringInfo out, TransactionId xid,
 								 Relation rel, Bitmapset *columns);
 extern LogicalRepRelation *logicalrep_read_rel(StringInfo in);

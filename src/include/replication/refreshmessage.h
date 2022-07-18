@@ -20,6 +20,7 @@
 typedef struct xl_logical_refresh_message
 {
 	Oid			dbId;			/* database Oid emitted from */
+	Oid			matviewId;
 	Size		prefix_size;	/* length of prefix */
 	Size		role_size;      /* length of the role that executes the refresh command */
 	Size		search_path_size; /* length of the search path */
@@ -34,8 +35,8 @@ typedef struct xl_logical_refresh_message
 
 #define SizeOfLogicalRefreshMessage	(offsetof(xl_logical_refresh_message, message))
 
-extern XLogRecPtr LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *refresh_message,
-									   size_t size);
+extern XLogRecPtr LogLogicalRefreshMessage(
+	const char *prefix, Oid roleoid, const char *refresh_message, size_t size, Oid matviewOid);
 
 /* RMGR API*/
 #define XLOG_LOGICAL_REFRESH_MESSAGE	0x00

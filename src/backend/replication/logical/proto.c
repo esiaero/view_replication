@@ -710,53 +710,6 @@ logicalrep_write_ddlmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
 }
 
 /*
- * Read REFRESH MESSAGE from stream
- */
-const char *
-logicalrep_read_refreshmessage(StringInfo in, XLogRecPtr *lsn,
-						   const char **prefix,
-						   const char **role,
-						   const char **search_path,
-						   Size *sz)
-{
-	const char *msg;
-
-	//TODO double check when do we need to get TransactionId.
-
-	*lsn = pq_getmsgint64(in);
-	*prefix = pq_getmsgstring(in);
-	*role = pq_getmsgstring(in);
-	*search_path = pq_getmsgstring(in);
-	*sz = pq_getmsgint(in, 4);
-	msg = pq_getmsgbytes(in, *sz);
-
-	return msg;
-}
-
-/*
- * Write REFRESH MESSAGE to stream
- */
-void
-logicalrep_write_refreshmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
-						 const char *prefix, const char *role,
-						 const char *search_path, Size sz, const char *message)
-{
-
-	pq_sendbyte(out, LOGICAL_REP_MSG_REFRESHMESSAGE);
-
-	/* transaction ID (if not valid, we're not streaming) */
-	if (TransactionIdIsValid(xid))
-		pq_sendint32(out, xid);
-
-	pq_sendint64(out, lsn);
-	pq_sendstring(out, prefix);
-	pq_sendstring(out, role);
-	pq_sendstring(out, search_path);
-	pq_sendint32(out, sz);
-	pq_sendbytes(out, message, sz);
-}
-
-/*
  * Write relation description to the output stream.
  */
 void

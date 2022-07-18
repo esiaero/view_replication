@@ -142,9 +142,10 @@ typedef struct ReorderBufferChange
 			char	   *message;
 		}			ddlmsg;
 
-				/* REFRESH Message. */
+		/* REFRESH Message. */
 		struct
 		{
+			Oid		    matviewId;
 			char	   *prefix;
 			char	   *role;
 			char	   *search_path;
@@ -464,13 +465,9 @@ typedef void (*ReorderBufferDDLMessageCB) (ReorderBuffer *rb,
 
 /* REFRESH message callback signature */
 typedef void (*ReorderBufferREFRESHMessageCB) (ReorderBuffer *rb,
-										   ReorderBufferTXN *txn,
-										   XLogRecPtr message_lsn,
-										   const char *prefix,
-										   const char *role,
-										   const char *search_path,
-										   Size sz,
-										   const char *message);
+											   ReorderBufferTXN *txn,
+											   Relation relation,
+											   ReorderBufferChange *change);
 
 /* begin prepare callback signature */
 typedef void (*ReorderBufferBeginPrepareCB) (ReorderBuffer *rb,
@@ -553,12 +550,8 @@ typedef void (*ReorderBufferStreamDDLMessageCB) (
 typedef void (*ReorderBufferStreamREFRESHMessageCB) (
 												 ReorderBuffer *rb,
 												 ReorderBufferTXN *txn,
-												 XLogRecPtr message_lsn,
-												 const char *prefix,
-												 const char *role,
-												 const char *search_path,
-												 Size sz,
-												 const char *message);
+												 Relation relation,
+												 ReorderBufferChange *change);
 
 /* stream truncate callback signature */
 typedef void (*ReorderBufferStreamTruncateCB) (
@@ -704,11 +697,12 @@ extern void ReorderBufferQueueMessage(ReorderBuffer *, TransactionId, Snapshot s
 									  bool transactional, const char *prefix,
 									  Size message_size, const char *message);
 extern void ReorderBufferQueueDDLMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
-										const char *prefix, const char *role,
+										 const char *prefix, const char *role,
 										 const char *search_path, Size message_size, const char *message);
 extern void ReorderBufferQueueREFRESHMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
-										const char *prefix, const char *role,
-										 const char *search_path, Size message_size, const char *message);
+											 const char *prefix, const char *role,
+											 const char *search_path, Size message_size,
+											 Oid matviewId, const char *message);
 extern void ReorderBufferCommit(ReorderBuffer *, TransactionId,
 								XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
 								TimestampTz commit_time, RepOriginId origin_id, XLogRecPtr origin_lsn);

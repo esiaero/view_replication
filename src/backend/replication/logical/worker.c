@@ -2475,21 +2475,6 @@ apply_handle_ddlmessage(StringInfo s)
 	apply_execute_sql_command(msg, role, search_path, true);
 }
 
-static void
-apply_handle_refreshmessage(StringInfo s)
-{
-	XLogRecPtr lsn;
-	Size sz;
-	const char *prefix;
-	const char *role;
-	const char *search_path;
-	const char *msg;
-
-	msg = logicalrep_read_refreshmessage(s, &lsn, &prefix, &role, &search_path, &sz);
-
-	apply_execute_sql_command(msg, role, search_path, true);
-}
-
 /*
  * Add context to the errors produced by apply_execute_sql_command().
  */
@@ -2881,7 +2866,7 @@ apply_dispatch(StringInfo s)
 			break;
 
 		case LOGICAL_REP_MSG_REFRESHMESSAGE:
-			apply_handle_refreshmessage(s);
+			apply_handle_ddlmessage(s);
 			break;
 
 		case LOGICAL_REP_MSG_STREAM_START:

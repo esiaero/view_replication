@@ -105,12 +105,8 @@ typedef void (*LogicalDecodeDDLMessageCB) (struct LogicalDecodingContext *ctx,
  */
 typedef void (*LogicalDecodeREFRESHMessageCB) (struct LogicalDecodingContext *ctx,
 										   ReorderBufferTXN *txn,
-										   XLogRecPtr message_lsn,
-										   const char *prefix,
-										   const char *role,
-										   const char *search_path,
-										   Size message_size,
-										   const char *message);
+										   Relation relation,
+										   ReorderBufferChange *change);
 
 /*
  * Filter changes by origin.
@@ -242,12 +238,8 @@ typedef void (*LogicalDecodeStreamDDLMessageCB) (struct LogicalDecodingContext *
  */
 typedef void (*LogicalDecodeStreamREFRESHMessageCB) (struct LogicalDecodingContext *ctx,
 												 ReorderBufferTXN *txn,
-												 XLogRecPtr message_lsn,
-												 const char *prefix,
-												 const char *role,
-												 const char *search_path,
-												 Size message_size,
-												 const char *message);
+												 Relation relation,
+												 ReorderBufferChange *change);
 
 /*
  * Callback for streaming truncates from in-progress transactions.

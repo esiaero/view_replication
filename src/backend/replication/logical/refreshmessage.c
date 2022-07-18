@@ -31,7 +31,7 @@
  */
 XLogRecPtr
 LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *message,
-					 size_t size)
+					 size_t size, Oid matviewOid)
 {
 	xl_logical_refresh_message xlrec;
 	const char *role;
@@ -45,6 +45,7 @@ LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *message,
 	GetCurrentTransactionId();
 
 	xlrec.dbId = MyDatabaseId;
+	xlrec.matviewId = matviewOid;
 	/* trailing zero is critical; see logicalrefreshmsg_desc */
 	xlrec.prefix_size = strlen(prefix) + 1;
 	xlrec.role_size = strlen(role) + 1;

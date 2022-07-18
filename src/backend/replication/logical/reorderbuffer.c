@@ -931,7 +931,7 @@ void
 ReorderBufferQueueREFRESHMessage(ReorderBuffer *rb, TransactionId xid,
 						  XLogRecPtr lsn, const char *prefix,
 						  const char *role, const char *search_path,
-						  Size message_size, const char *message)
+						  Size message_size, Oid matviewId, const char *message)
 {
 	MemoryContext oldcontext;
 	ReorderBufferChange *change;
@@ -946,6 +946,7 @@ ReorderBufferQueueREFRESHMessage(ReorderBuffer *rb, TransactionId xid,
 	change->data.refreshmsg.role = pstrdup(role);
 	change->data.refreshmsg.search_path = pstrdup(search_path);
 	change->data.refreshmsg.message_size = message_size;
+	change->data.refreshmsg.matviewId = matviewId;
 	change->data.refreshmsg.message = palloc(message_size);
 	memcpy(change->data.refreshmsg.message, message, message_size);
 
@@ -2073,22 +2074,13 @@ ReorderBufferApplyDDLMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
  */
 static inline void
 ReorderBufferApplyREFRESHMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
-							 ReorderBufferChange *change, bool streaming)
+							 ReorderBufferChange *change, bool streaming,
+							 Relation relation)
 {
 	if (streaming)
-		rb->stream_refreshmessage(rb, txn, change->lsn,
-							  change->data.refreshmsg.prefix,
-							  change->data.refreshmsg.role,
-							  change->data.refreshmsg.search_path,
-							  change->data.refreshmsg.message_size,
-							  change->data.refreshmsg.message);
+		rb->stream_refreshmessage(rb, txn, relation, change);
 	else
-		rb->refreshmessage(rb, txn, change->lsn,
-					   change->data.refreshmsg.prefix,
-					   change->data.refreshmsg.role,
-					   change->data.refreshmsg.search_path,
-					   change->data.refreshmsg.message_size,
-					   change->data.refreshmsg.message);
+		rb->refreshmessage(rb, txn, relation, change);
 }
 
 /*
@@ -2474,9 +2466,15 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 					break;
 
 				case REORDER_BUFFER_CHANGE_REFRESHMESSAGE:
-					ReorderBufferApplyREFRESHMessage(rb, txn, change, streaming);
-					break;
+				{
+					Oid relid = change->data.refreshmsg.matviewId;
+					Relation relation;
 
+					relation = RelationIdGetRelation(relid);
+					ReorderBufferApplyREFRESHMessage(
+						rb, txn, change, streaming, relation);
+					break;
+				}
 				case REORDER_BUFFER_CHANGE_INVALIDATION:
 					/* Execute the invalidation messages locally */
 					ReorderBufferExecuteInvalidations(change->data.inval.ninvalidations,

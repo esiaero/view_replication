@@ -17,6 +17,7 @@
 #include "catalog/objectaddress.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
+#include "parser/parse_node.h"
 #include "tcop/dest.h"
 #include "utils/relcache.h"
 
@@ -24,7 +25,8 @@
 extern void SetMatViewPopulatedState(Relation relation, bool newstate);
 
 extern ObjectAddress ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
-										ParamListInfo params, QueryCompletion *qc);
+										ParamListInfo params, QueryCompletion *qc,
+										ParseState *pstate, bool isCompleteQuery);
 
 extern DestReceiver *CreateTransientRelDestReceiver(Oid oid);
 

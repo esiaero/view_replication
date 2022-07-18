@@ -59,9 +59,8 @@ static void pgoutput_ddlmessage(LogicalDecodingContext *ctx,
 								const char *prefix, const char *role,
 								const char *search_path, Size sz, const char *message);
 static void pgoutput_refreshmessage(LogicalDecodingContext *ctx,
-								ReorderBufferTXN *txn, XLogRecPtr message_lsn,
-								const char *prefix, const char *role,
-								const char *search_path, Size sz, const char *message);
+								ReorderBufferTXN *txn,
+								Relation relation, ReorderBufferChange *change);
 static bool pgoutput_origin_filter(LogicalDecodingContext *ctx,
 								   RepOriginId origin_id);
 static void pgoutput_begin_prepare_txn(LogicalDecodingContext *ctx,
@@ -1773,26 +1772,9 @@ pgoutput_ddlmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	foreach(lc, data->publications)
 	{
 		Publication *pub = (Publication *) lfirst(lc);
-		List* parsetree_list; /* temp. added for refresh */
-		ListCell* parsetree_item; /* temp. added for refresh */
 		/* TODO need to check relid for table level DDLs */
 		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
 			return;
-
-		/* Temp. check here, until DDL rep. finalizes changes from deparser?
-		 * Note this solution requires a wait_for_catchup to isolate REFRESH msgs, 
-		 * otherwise the whole message is discarded.
-		 * Alternatively an entirely separate line of logic for logging REFRESH 
-		 * can be written out?
-		 */
-		parsetree_list = pg_parse_query(message);
-		foreach(parsetree_item, parsetree_list)
-		{
-			RawStmt *command = (RawStmt *) lfirst(parsetree_item);
-			if (nodeTag(command->stmt) == T_RefreshMatViewStmt &&
-				!pub->pubactions.pubrefresh)
-				return;
-		}
 	}
 
 	/*
@@ -1825,15 +1807,15 @@ pgoutput_ddlmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 }
 
 static void
-pgoutput_refreshmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
-				 XLogRecPtr message_lsn,
-				 const char *prefix, const char * role,
-				 const char *search_path, Size sz, const char *message)
+pgoutput_refreshmessage(LogicalDecodingContext *ctx,
+						ReorderBufferTXN *txn,
+						Relation relation, ReorderBufferChange *change)
 {
 	PGOutputData *data = (PGOutputData *) ctx->output_plugin_private;
 	TransactionId xid = InvalidTransactionId;
 	ListCell *lc;
 	PGOutputTxnData *txndata;
+	RelationSyncEntry *relentry;
 
 	/* Reload publications if needed before use. */
 	if (!publications_valid)
@@ -1847,58 +1829,53 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 		publications_valid = true;
 	}
 
-	/* Check if refresh replication is turned on for the publications */
+	/*
+	 * Check if ddl replication is turned on for the publication - needed for 
+	 * materialized views? Likely YES until DDL deparser changes are added
+	 */
 	foreach(lc, data->publications)
 	{
 		Publication *pub = (Publication *) lfirst(lc);
-		List* parsetree_list; /* temp. added for refresh */
-		ListCell* parsetree_item; /* temp. added for refresh */
-		/* TODO need to check relid for table level REFRESHes */
+		/* TODO need to check relid for table level DDLs */
 		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
 			return;
-
-		/* Temp. check here, until REFRESH rep. finalizes changes from deparser?
-		 * Note this solution requires a wait_for_catchup to isolate REFRESH msgs, 
-		 * otherwise the whole message is discarded.
-		 * Alternatively an entirely separate line of logic for logging REFRESH 
-		 * can be written out?
-		 */
-		parsetree_list = pg_parse_query(message);
-		foreach(parsetree_item, parsetree_list)
-		{
-			RawStmt *command = (RawStmt *) lfirst(parsetree_item);
-			if (nodeTag(command->stmt) == T_RefreshMatViewStmt &&
-				!pub->pubactions.pubrefresh)
-				return;
-		}
 	}
 
 	/*
-	 * Remember the xid for the message in streaming mode. See
-	 * pgoutput_change.
+	 * Currently materialized views (i.e., RELKIND_MATVIEWs) are not considered publishable.
+	 * i.e. if (!is_publishable_relation(matview relation)) -> true
+	 * Changing that seems to entail a lot of other changes so ignore for now. 
+	 * A non-RELKIND_MATVIEW shouldn't be possible anyways.
 	 */
+
+	/* Remember the xid for the message in streaming mode. See pgoutput_change. */
 	if (in_streaming)
 		xid = txn->xid;
 
-	/*
-	 * Output BEGIN if we haven't yet. Avoid for non-transactional
-	 * messages.
-	 */
+	relentry = get_rel_sync_entry(data, relation);
+
+	if (!relentry->pubactions.pubrefresh)
+		return;
+
+	/* Output BEGIN if we haven't yet. Avoid for non-transactional messages. */
 	txndata = (PGOutputTxnData *) txn->output_plugin_private;
 
 	/* Send BEGIN if we haven't yet */
 	if (txndata && !txndata->sent_begin_txn)
 		pgoutput_send_begin(ctx, txn);
 
+	maybe_send_schema(ctx, change, relation, relentry);
+
 	OutputPluginPrepareWrite(ctx, true);
-	logicalrep_write_refreshmessage(ctx->out,
-							 xid,
-							 message_lsn,
-							 prefix,
-							 role,
-							 search_path,
-							 sz,
-							 message);
+	/* REFRESH replication based on DDL so just use the command itself, may change in the future */
+	logicalrep_write_ddlmessage(ctx->out,
+									xid,
+									change->lsn,
+									change->data.refreshmsg.prefix,
+									change->data.refreshmsg.role,
+									change->data.refreshmsg.search_path,
+									change->data.refreshmsg.message_size,
+									change->data.refreshmsg.message);
 	OutputPluginWrite(ctx, true);
 }
 

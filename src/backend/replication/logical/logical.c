@@ -78,9 +78,7 @@ static void ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 								  const char *role, const char *search_path,
 								  Size message_size, const char *message);
 static void refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
-								  XLogRecPtr message_lsn, const char *prefix,
-								  const char *role, const char *search_path,
-								  Size message_size, const char *message);
+								  	  Relation relation, ReorderBufferChange *change);
 
 /* streaming callbacks */
 static void stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
@@ -103,9 +101,7 @@ static void stream_ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN 
 										 const char *role, const char *search_path,
 										 Size message_size, const char *message);
 static void stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
-										 XLogRecPtr message_lsn, const char *prefix,
-										 const char *role, const char *search_path,
-										 Size message_size, const char *message);
+								  			 Relation relation, ReorderBufferChange *change);
 static void stream_truncate_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 									   int nrelations, Relation relations[], ReorderBufferChange *change);
 
@@ -1281,9 +1277,7 @@ ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 
 static void
 refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
-					  XLogRecPtr message_lsn, const char *prefix,
-					  const char *role, const char *search_path,
-					  Size message_size, const char *message)
+						  Relation relation, ReorderBufferChange *change)
 {
 	LogicalDecodingContext *ctx = cache->private_data;
 	LogicalErrorCallbackState state;
@@ -1297,7 +1291,7 @@ refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 	/* Push callback + info on the error context stack */
 	state.ctx = ctx;
 	state.callback_name = "refreshmessage";
-	state.report_location = message_lsn;
+	state.report_location = change->lsn;
 	errcallback.callback = output_plugin_error_callback;
 	errcallback.arg = (void *) &state;
 	errcallback.previous = error_context_stack;
@@ -1306,11 +1300,10 @@ refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 	/* set output state */
 	ctx->accept_writes = true;
 	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
-	ctx->write_location = message_lsn;
+	ctx->write_location = change->lsn;
 
 	/* do the actual work: call callback */
-	ctx->callbacks.refreshmessage_cb(ctx, txn, message_lsn, prefix,
-								 role, search_path, message_size, message);
+	ctx->callbacks.refreshmessage_cb(ctx, txn, relation, change);
 
 	/* Pop the error context stack */
 	error_context_stack = errcallback.previous;
@@ -1674,9 +1667,7 @@ stream_ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 
 static void
 stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
-							 XLogRecPtr message_lsn, const char *prefix,
-							 const char *role, const char* search_path,
-							 Size message_size, const char *message)
+								 Relation relation, ReorderBufferChange *change)
 {
 	LogicalDecodingContext *ctx = cache->private_data;
 	LogicalErrorCallbackState state;
@@ -1694,7 +1685,7 @@ stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 	/* Push callback + info on the error context stack */
 	state.ctx = ctx;
 	state.callback_name = "stream_refreshmessage";
-	state.report_location = message_lsn;
+	state.report_location = change->lsn;
 	errcallback.callback = output_plugin_error_callback;
 	errcallback.arg = (void *) &state;
 	errcallback.previous = error_context_stack;
@@ -1703,11 +1694,10 @@ stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 	/* set output state */
 	ctx->accept_writes = true;
 	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
-	ctx->write_location = message_lsn;
+	ctx->write_location = change->lsn;
 
 	/* do the actual work: call callback */
-	ctx->callbacks.stream_refreshmessage_cb(ctx, txn, message_lsn, prefix,
-										role, search_path, message_size, message);
+	ctx->callbacks.stream_refreshmessage_cb(ctx, txn, relation, change);
 
 	/* Pop the error context stack */
 	error_context_stack = errcallback.previous;
