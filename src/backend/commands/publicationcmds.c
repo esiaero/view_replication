@@ -85,20 +85,23 @@ parse_publication_options(ParseState *pstate,
 						  PublicationActions *pubactions,
 						  bool *publish_via_partition_root_given,
 						  bool *publish_via_partition_root,
-						  bool *ddl_level_given)
+						  bool *ddl_level_given,
+						  bool *refresh_data)
 {
 	ListCell   *lc;
 
 	*publish_given = false;
 	*publish_via_partition_root_given = false;
 	*ddl_level_given = false;
+	*refresh_data = false;
 
 	/* defaults */
 	pubactions->pubinsert = true;
 	pubactions->pubupdate = true;
 	pubactions->pubdelete = true;
 	pubactions->pubtruncate = true;
-	pubactions->pubrefresh = false; /* consider setting to for_all_tables? */
+	pubactions->pubrefresh = false;
+	pubactions->pubrefresh_data = false;
 	*publish_via_partition_root = false;
 	if (for_all_tables)
 	{
@@ -133,7 +136,7 @@ parse_publication_options(ParseState *pstate,
 			pubactions->pubupdate = false;
 			pubactions->pubdelete = false;
 			pubactions->pubtruncate = false;
-			pubactions->pubrefresh = false; /* currently defaults to false */
+			pubactions->pubrefresh = false; /* defaults to false anyways */
 
 			*publish_given = true;
 			publish = defGetString(defel);
@@ -163,6 +166,17 @@ parse_publication_options(ParseState *pstate,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("unrecognized \"publish\" value: \"%s\"", publish_opt)));
 			}
+		}
+		else if (strcmp(defel->defname, "refresh_data") == 0)
+		{
+			if (*refresh_data)
+				errorConflictingDefElem(defel, pstate);
+			if (!pubactions->pubrefresh)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("refresh must be published to refresh data changes!")));
+			*refresh_data = true;
+			pubactions->pubrefresh_data = defGetBoolean(defel);
 		}
 		else if (strcmp(defel->defname, "publish_via_partition_root") == 0)
 		{
@@ -828,6 +842,7 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 	HeapTuple	tup;
 	bool		publish_given;
 	bool		ddl_level_given;
+	bool		refresh_data;
 	PublicationActions pubactions;
 	bool		publish_via_partition_root_given;
 	bool		publish_via_partition_root;
@@ -874,7 +889,8 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 							  &publish_given, &pubactions,
 							  &publish_via_partition_root_given,
 							  &publish_via_partition_root,
-							  &ddl_level_given);
+							  &ddl_level_given,
+							  &refresh_data);
 
 	puboid = GetNewOidWithIndex(rel, PublicationObjectIndexId,
 								Anum_pg_publication_oid);
@@ -897,6 +913,8 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 		BoolGetDatum(pubactions.pubddl_table);
 	values[Anum_pg_publication_pubrefresh - 1] =
 		BoolGetDatum(pubactions.pubrefresh);
+	values[Anum_pg_publication_pubrefresh_data - 1] =
+		BoolGetDatum(pubactions.pubrefresh_data);
 
 	tup = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -984,6 +1002,7 @@ AlterPublicationOptions(ParseState *pstate, AlterPublicationStmt *stmt,
 	Datum		values[Natts_pg_publication];
 	bool		publish_given;
 	bool        ddl_level_given;
+	bool		refresh_data;
 	PublicationActions pubactions;
 	bool		publish_via_partition_root_given;
 	bool		publish_via_partition_root;
@@ -1000,7 +1019,8 @@ AlterPublicationOptions(ParseState *pstate, AlterPublicationStmt *stmt,
 							  &publish_given, &pubactions,
 							  &publish_via_partition_root_given,
 							  &publish_via_partition_root,
-							  &ddl_level_given);
+							  &ddl_level_given,
+							  &refresh_data);
 
 	pubform = (Form_pg_publication) GETSTRUCT(tup);
 
@@ -1114,6 +1134,12 @@ AlterPublicationOptions(ParseState *pstate, AlterPublicationStmt *stmt,
 
 		values[Anum_pg_publication_pubddl_table - 1] = BoolGetDatum(pubactions.pubddl_table);
 		replaces[Anum_pg_publication_pubddl_table - 1] = true;
+	}
+
+	if (refresh_data)
+	{
+		values[Anum_pg_publication_pubrefresh_data - 1] = BoolGetDatum(pubactions.pubrefresh_data);
+		replaces[Anum_pg_publication_pubrefresh_data - 1] = true;
 	}
 
 	if (publish_via_partition_root_given)

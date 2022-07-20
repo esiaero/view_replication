@@ -5630,6 +5630,7 @@ RelationBuildPublicationDesc(Relation relation, PublicationDesc *pubdesc)
 		pubdesc->pubactions.pubddl_database |= pubform->pubddl_database;
 		pubdesc->pubactions.pubddl_table |= pubform->pubddl_table;
 		pubdesc->pubactions.pubrefresh |= pubform->pubrefresh;
+		pubdesc->pubactions.pubrefresh_data |= pubform->pubrefresh_data;
 
 		/*
 		 * Check if all columns referenced in the filter expression are part

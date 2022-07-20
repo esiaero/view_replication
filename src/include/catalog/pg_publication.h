@@ -64,6 +64,9 @@ CATALOG(pg_publication,6104,PublicationRelationId)
 
 	/* true if refreshes are published */
 	bool		pubrefresh;
+
+	/* true if refresh data changes are published */
+	bool		pubrefresh_data;
 } FormData_pg_publication;
 
 /* ----------------
@@ -85,6 +88,7 @@ typedef struct PublicationActions
 	bool		pubddl_database;
 	bool		pubddl_table;
 	bool		pubrefresh;
+	bool		pubrefresh_data;
 } PublicationActions;
 
 typedef struct PublicationDesc

@@ -1009,6 +1009,7 @@ GetPublication(Oid pubid)
 	pub->pubactions.pubddl_database = pubform->pubddl_database;
 	pub->pubactions.pubddl_table = pubform->pubddl_table;
 	pub->pubactions.pubrefresh = pubform->pubrefresh;
+	pub->pubactions.pubrefresh_data = pubform->pubrefresh_data;
 
 	ReleaseSysCache(tup);
 

@@ -6050,7 +6050,7 @@ listPublications(const char *pattern)
 	PQExpBufferData buf;
 	PGresult   *res;
 	printQueryOpt myopt = pset.popt;
-	static const bool translate_columns[] = {false, false, false, false, false, false, false, false, false, false, false};
+	static const bool translate_columns[] = {false, false, false, false, false, false, false, false, false, false, false, false};
 
 	if (pset.sversion < 100000)
 	{
@@ -6082,9 +6082,14 @@ listPublications(const char *pattern)
 						  ",\n  pubtruncate AS \"%s\"",
 						  gettext_noop("Truncates"));
 	if (pset.sversion >= 150000)
+	{
 		appendPQExpBuffer(&buf,
 						  ",\n  pubrefresh AS \"%s\"",
-						  gettext_noop("Refresh"));
+						  gettext_noop("Refreshes"));
+		appendPQExpBuffer(&buf,
+						  ",\n  pubrefresh_data AS \"%s\"",
+						  gettext_noop("Refreshes data"));
+	}
 	if (pset.sversion >= 130000)
 		appendPQExpBuffer(&buf,
 						  ",\n  pubviaroot AS \"%s\"",
@@ -6217,7 +6222,7 @@ describePublications(const char *pattern)
 							 ", pubtruncate");
 	if (has_pubrefresh)
 		appendPQExpBufferStr(&buf,
-							 ", pubrefresh");
+							 ", pubrefresh, pubrefresh_data");
 	if (has_pubviaroot)
 		appendPQExpBufferStr(&buf,
 							 ", pubviaroot");
@@ -6273,7 +6278,7 @@ describePublications(const char *pattern)
 		if (has_pubtruncate)
 			ncols++;
 		if (has_pubrefresh)
-			ncols++;
+			ncols += 2; /* 2 cols include refresh_data */
 		if (has_pubviaroot)
 			ncols++;
 		if (has_pubddl)
@@ -6291,7 +6296,10 @@ describePublications(const char *pattern)
 		if (has_pubtruncate)
 			printTableAddHeader(&cont, gettext_noop("Truncates"), true, align);
 		if (has_pubrefresh)
+		{
 			printTableAddHeader(&cont, gettext_noop("Refreshes"), true, align);
+			printTableAddHeader(&cont, gettext_noop("Refreshes data"), true, align);
+		}
 		if (has_pubviaroot)
 			printTableAddHeader(&cont, gettext_noop("Via root"), true, align);
 		if (has_pubddl)
@@ -6308,13 +6316,16 @@ describePublications(const char *pattern)
 		if (has_pubtruncate)
 			printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
 		if (has_pubrefresh)
+		{
 			printTableAddCell(&cont, PQgetvalue(res, i, 8), false, false);
-		if (has_pubviaroot)
 			printTableAddCell(&cont, PQgetvalue(res, i, 9), false, false);
+		}
+		if (has_pubviaroot)
+			printTableAddCell(&cont, PQgetvalue(res, i, 10), false, false);
 		if (has_pubddl)
 		{
-			printTableAddCell(&cont, PQgetvalue(res, i, 10), false, false);
 			printTableAddCell(&cont, PQgetvalue(res, i, 11), false, false);
+			printTableAddCell(&cont, PQgetvalue(res, i, 12), false, false);
 		}
 
 		if (!puballtables)

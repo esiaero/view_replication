@@ -5969,9 +5969,9 @@ List of schemas
 (0 rows)
 
 \dRp "no.such.publication"
-                                                  List of publications
- Name | Owner | All tables | Inserts | Updates | Deletes | Truncates | Via root | Database level DDLs | Table level DDLs 
-------+-------+------------+---------+---------+---------+-----------+----------+---------------------+------------------
+                                                                 List of publications
+ Name | Owner | All tables | Inserts | Updates | Deletes | Truncates | Refreshes | Refreshes data | Via root | Database level DDLs | Table level DDLs 
+------+-------+------------+---------+---------+---------+-----------+-----------+----------------+----------+---------------------+------------------
 (0 rows)
 
 \dRs "no.such.subscription"

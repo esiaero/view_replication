@@ -1857,6 +1857,9 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 	if (!relentry->pubactions.pubrefresh)
 		return;
 
+	if (!relentry->pubactions.pubrefresh_data)
+		; /* TODO: something with pubrefreshdata */
+
 	/* Output BEGIN if we haven't yet. Avoid for non-transactional messages. */
 	txndata = (PGOutputTxnData *) txn->output_plugin_private;
 
@@ -2167,7 +2170,8 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 			entry->pubactions.pubdelete = entry->pubactions.pubtruncate =
 			entry->pubactions.pubddl_database =
 			entry->pubactions.pubddl_table = 
-			entry->pubactions.pubrefresh = false;
+			entry->pubactions.pubrefresh = 
+			entry->pubactions.pubrefresh_data = false;
 		entry->new_slot = NULL;
 		entry->old_slot = NULL;
 		memset(entry->exprstate, 0, sizeof(entry->exprstate));
@@ -2228,6 +2232,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 		entry->pubactions.pubddl_database = false;
 		entry->pubactions.pubddl_table = false;
 		entry->pubactions.pubrefresh = false;
+		entry->pubactions.pubrefresh_data = false;
 
 		/*
 		 * Tuple slots cleanups. (Will be rebuilt later if needed).
@@ -2344,6 +2349,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 				entry->pubactions.pubddl_database |= pub->pubactions.pubddl_database;
 				entry->pubactions.pubddl_table |= pub->pubactions.pubddl_table;
 				entry->pubactions.pubrefresh |= pub->pubactions.pubrefresh;
+				entry->pubactions.pubrefresh_data |= pub->pubactions.pubrefresh_data;
 
 				/*
 				 * We want to publish the changes as the top-most ancestor
