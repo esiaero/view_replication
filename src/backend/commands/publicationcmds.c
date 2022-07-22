@@ -100,6 +100,11 @@ parse_publication_options(ParseState *pstate,
 	pubactions->pubupdate = true;
 	pubactions->pubdelete = true;
 	pubactions->pubtruncate = true;
+	/* pubrefresh(es) default to false, since pubrefresh_data variable may compete 
+	 * (depending on implementation) to determine whether to replicate command or 
+	 * replicate data change. Currently it does not compete (it is contingent) but
+	 * this may change in the future pending community review of the design.
+	 */
 	pubactions->pubrefresh = false;
 	pubactions->pubrefresh_data = false;
 	*publish_via_partition_root = false;
@@ -136,7 +141,7 @@ parse_publication_options(ParseState *pstate,
 			pubactions->pubupdate = false;
 			pubactions->pubdelete = false;
 			pubactions->pubtruncate = false;
-			pubactions->pubrefresh = false; /* defaults to false anyways */
+			pubactions->pubrefresh = false;
 
 			*publish_given = true;
 			publish = defGetString(defel);
