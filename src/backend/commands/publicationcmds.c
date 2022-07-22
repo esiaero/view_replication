@@ -179,7 +179,7 @@ parse_publication_options(ParseState *pstate,
 			if (!pubactions->pubrefresh)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("refresh must be published to refresh data changes!")));
+						 errmsg("REFRESH must be listed in \"publish\" to enable publishing data changes from REFRESH")));
 			*refresh_data = true;
 			pubactions->pubrefresh_data = defGetBoolean(defel);
 		}
