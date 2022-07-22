@@ -98,7 +98,13 @@ parse_publication_options(ParseState *pstate,
 	pubactions->pubupdate = true;
 	pubactions->pubdelete = true;
 	pubactions->pubtruncate = true;
-	pubactions->pubrefresh = false; /* consider setting to for_all_tables? */
+	/* 
+	 * pubrefresh(es) default to false, since any pubrefresh_data variable may compete 
+	 * (depending on implementation) to determine whether to replicate command or 
+	 * replicate data change. Currently the design does not compete (it is contingent) 
+	 * but may change in the future pending community review of the design.
+	 */
+	pubactions->pubrefresh = false;
 	*publish_via_partition_root = false;
 	if (for_all_tables)
 	{
@@ -133,7 +139,11 @@ parse_publication_options(ParseState *pstate,
 			pubactions->pubupdate = false;
 			pubactions->pubdelete = false;
 			pubactions->pubtruncate = false;
+<<<<<<< HEAD
 			pubactions->pubrefresh = false; /* currently defaults to false */
+=======
+			pubactions->pubrefresh = false;
+>>>>>>> b955820eeb (Fix comments from CR-72990672 on RDSPostgres repo)
 
 			*publish_given = true;
 			publish = defGetString(defel);

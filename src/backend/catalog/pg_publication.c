@@ -1210,7 +1210,7 @@ pg_get_publication_tables(PG_FUNCTION_ARGS)
 
 /*
  * Checks if DDL on relation (relid) need xlog for logical replication
- */
+ */ 
 bool
 ddl_need_xlog(Oid relid, bool forAllTabPubOnly)
 {
@@ -1259,7 +1259,10 @@ ddl_need_xlog(Oid relid, bool forAllTabPubOnly)
 
 
 /*
- * Analogous command to above to see if refresh should be logged; consider merging the methods?
+ * Analogous command to above to see if refresh should be logged.
+ * Separated in anticipation of possible changes with single view replication,
+ * which may differ from the above ddl_need_xlog command (pending investigation).
+ * Otherwise(TODO) will eventually be merged with above.
  */
 bool
 refresh_need_xlog(Oid relid, bool forAllTabPubOnly)
