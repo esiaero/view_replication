@@ -139,12 +139,7 @@ parse_publication_options(ParseState *pstate,
 			pubactions->pubupdate = false;
 			pubactions->pubdelete = false;
 			pubactions->pubtruncate = false;
-<<<<<<< HEAD
-			pubactions->pubrefresh = false; /* currently defaults to false */
-=======
 			pubactions->pubrefresh = false;
->>>>>>> b955820eeb (Fix comments from CR-72990672 on RDSPostgres repo)
-
 			*publish_given = true;
 			publish = defGetString(defel);
 
