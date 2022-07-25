@@ -19,6 +19,10 @@
 /*
  * Issue an errdetail() informing that the relkind is not supported for this
  * operation.
+ * 
+ * Right now cases for RELKIND_[MAT]VIEW exist, but at some point (may)
+ * be removed depending on how general DDL replication changes and how/if
+ * view replication imitates it. (see execReplication CheckSubscriptionRelkind())
  */
 int
 errdetail_relkind_not_supported(char relkind)
@@ -35,7 +39,7 @@ errdetail_relkind_not_supported(char relkind)
 			return errdetail("This operation is not supported for TOAST tables.");
 		case RELKIND_VIEW:
 			return errdetail("This operation is not supported for views.");
-		case RELKIND_MATVIEW:
+		case RELKIND_MATVIEW: 
 			return errdetail("This operation is not supported for materialized views.");
 		case RELKIND_COMPOSITE_TYPE:
 			return errdetail("This operation is not supported for composite types.");

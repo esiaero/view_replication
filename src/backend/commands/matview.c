@@ -138,25 +138,12 @@ SetMatViewPopulatedState(Relation relation, bool newstate)
 ObjectAddress
 ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 				   ParamListInfo params, QueryCompletion *qc,
-				   ParseState *pstate, bool isCompleteQuery)
+				   bool isCompleteQuery)
 {
 	Oid			matviewOid;
 	Relation	matviewRel;
-	RewriteRule *rule;
-	List	   *actions;
-	Query	   *dataQuery;
-	Oid			tableSpace;
-	Oid			relowner;
-	Oid			OIDNewHeap;
-	DestReceiver *dest;
-	uint64		processed = 0;
 	bool		concurrent;
 	LOCKMODE	lockmode;
-	char		relpersistence;
-	Oid			save_userid;
-	int			save_sec_context;
-	int			save_nestlevel;
-	ObjectAddress address;
 
 	/* Determine strength of lock needed. */
 	concurrent = stmt->concurrent;
@@ -169,6 +156,30 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 										  lockmode, 0,
 										  RangeVarCallbackOwnsTable, NULL);
 	matviewRel = table_open(matviewOid, NoLock);
+	return ExecRefreshGuts(matviewRel, matviewOid, queryString, qc, 
+						   concurrent, stmt->skipData, isCompleteQuery);
+}
+
+/* queryString is src stmt */
+ObjectAddress ExecRefreshGuts(Relation matviewRel, Oid matviewOid,
+					const char *queryString,
+					QueryCompletion *qc,
+					bool concurrent, bool skipData, bool isCompleteQuery)
+{
+	RewriteRule *rule;
+	List	   *actions;
+	Query	   *dataQuery;
+	Oid			tableSpace;
+	Oid			relowner;
+	Oid			OIDNewHeap;
+	DestReceiver *dest;
+	uint64		processed = 0;
+	char		relpersistence;
+	Oid			save_userid;
+	int			save_sec_context;
+	int			save_nestlevel;
+	ObjectAddress address;
+
 	relowner = matviewRel->rd_rel->relowner;
 
 	/*
@@ -195,7 +206,7 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 				 errmsg("CONCURRENTLY cannot be used when the materialized view is not populated")));
 
 	/* Check that conflicting options have not been specified. */
-	if (concurrent && stmt->skipData)
+	if (concurrent && skipData)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 errmsg("%s and %s options cannot be used together",
@@ -268,9 +279,11 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 		const char* prefix = "";
 		LogLogicalRefreshMessage(prefix,
 								GetUserId(),
-								pstate->p_sourcetext,
-								strlen(pstate->p_sourcetext),
-								matviewOid);
+								queryString,
+								matviewOid,
+								concurrent,
+								skipData,
+								isCompleteQuery);
 	}
 
 	/*
@@ -292,7 +305,7 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 	 * Tentatively mark the matview as populated or not (this will roll back
 	 * if we fail later).
 	 */
-	SetMatViewPopulatedState(matviewRel, !stmt->skipData);
+	SetMatViewPopulatedState(matviewRel, !skipData);
 
 	/* Concurrent refresh builds new data in temp tablespace, and does diff. */
 	if (concurrent)
@@ -318,7 +331,7 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 	dest = CreateTransientRelDestReceiver(OIDNewHeap);
 
 	/* Generate the data, if wanted. */
-	if (!stmt->skipData)
+	if (!skipData)
 		processed = refresh_matview_datafill(dest, dataQuery, queryString);
 
 	/* Make the matview match the newly generated data. */
@@ -350,7 +363,7 @@ ExecRefreshMatView(RefreshMatViewStmt *stmt, const char *queryString,
 		 * inserts and deletes it issues get counted by lower-level code.)
 		 */
 		pgstat_count_truncate(matviewRel);
-		if (!stmt->skipData)
+		if (!skipData)
 			pgstat_count_heap_insert(matviewRel, processed);
 	}
 

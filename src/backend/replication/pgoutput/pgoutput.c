@@ -1857,9 +1857,6 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 	if (!relentry->pubactions.pubrefresh)
 		return;
 
-	if (!relentry->pubactions.pubrefresh_data)
-		; /* TODO: something with pubrefreshdata */
-
 	/* Output BEGIN if we haven't yet. Avoid for non-transactional messages. */
 	txndata = (PGOutputTxnData *) txn->output_plugin_private;
 
@@ -1870,15 +1867,27 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 	maybe_send_schema(ctx, change, relation, relentry);
 
 	OutputPluginPrepareWrite(ctx, true);
-	/* REFRESH replication based on DDL so just use the command itself, may change in the future */
-	logicalrep_write_ddlmessage(ctx->out,
-									xid,
-									change->lsn,
-									change->data.refreshmsg.prefix,
-									change->data.refreshmsg.role,
-									change->data.refreshmsg.search_path,
-									change->data.refreshmsg.message_size,
-									change->data.refreshmsg.message);
+
+	/* TODO: consider just using one, right now it looks confusing */
+	if (relentry->pubactions.pubrefresh_data)
+		logicalrep_write_refreshdata(ctx->out,
+									 xid,
+									 change->lsn,
+									 change->data.refreshmsg.matviewId,
+									 change->data.refreshmsg.concurrent,
+									 change->data.refreshmsg.skipData,
+									 change->data.refreshmsg.isCompleteQuery,
+									 change->data.refreshmsg.message,
+									 change->data.refreshmsg.message_size);
+	else	/* REFRESH replication based on DDL so just use the command itself, may change in the future */
+		logicalrep_write_ddlmessage(ctx->out,
+										xid,
+										change->lsn,
+										change->data.refreshmsg.prefix,
+										change->data.refreshmsg.role,
+										change->data.refreshmsg.search_path,
+										change->data.refreshmsg.message_size,
+										change->data.refreshmsg.message);
 	OutputPluginWrite(ctx, true);
 }
 

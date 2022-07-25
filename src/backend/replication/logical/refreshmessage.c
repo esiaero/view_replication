@@ -30,8 +30,8 @@
  * Write logical decoding refresh message into XLog.
  */
 XLogRecPtr
-LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *message,
-					 size_t size, Oid matviewOid)
+LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *message, Oid matviewOid,
+						 bool concurrent, bool skipData, bool isCompleteQuery)
 {
 	xl_logical_refresh_message xlrec;
 	const char *role;
@@ -50,14 +50,21 @@ LogLogicalRefreshMessage(const char *prefix, Oid roleoid, const char *message,
 	xlrec.prefix_size = strlen(prefix) + 1;
 	xlrec.role_size = strlen(role) + 1;
 	xlrec.search_path_size = strlen(namespace_search_path) + 1;
-	xlrec.message_size = size;
-
+	xlrec.message_size = strlen(message);
+	xlrec.flags = 0;
+	if (concurrent)
+		xlrec.flags |= XLL_REFRESH_CONCURR;
+	if (skipData)
+		xlrec.flags |= XLL_REFRESH_SKIPDATA;
+	if (isCompleteQuery)
+		xlrec.flags |= XLL_REFRESH_COMPLETEQUERY;
+	
 	XLogBeginInsert();
 	XLogRegisterData((char *) &xlrec, SizeOfLogicalRefreshMessage);
 	XLogRegisterData(unconstify(char *, prefix), xlrec.prefix_size);
 	XLogRegisterData(unconstify(char *, role), xlrec.role_size);
 	XLogRegisterData(namespace_search_path, xlrec.search_path_size);
-	XLogRegisterData(unconstify(char *, message), size);
+	XLogRegisterData(unconstify(char *, message), xlrec.message_size);
 
 	/* allow origin filtering */
 	XLogSetRecordFlags(XLOG_INCLUDE_ORIGIN);

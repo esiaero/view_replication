@@ -64,7 +64,7 @@ $sub_2_result = $node_subscriber_2->safe_psql('postgres', $check_view_rows);
 is($pub_result, qq(1|2), 'Sanity check'); 
 is($sub_result, qq(3|4\n1|2), 'REFRESH command was replicated');
 # Refresh data change
-# is($sub_2_result, qq(1|2), 'REFRESH data command was replicated');
+is($sub_2_result, qq(1|2), 'REFRESH data command was replicated');
 
 
 done_testing();

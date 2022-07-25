@@ -14,6 +14,10 @@
 #include "access/xlogdefs.h"
 #include "access/xlogreader.h"
 
+#define XLL_REFRESH_CONCURR			(1<<0)
+#define XLL_REFRESH_SKIPDATA		(1<<1)
+#define XLL_REFRESH_COMPLETEQUERY	(1<<2)
+
 /*
  * Generic logical decoding refresh message wal record.
  */
@@ -21,10 +25,14 @@ typedef struct xl_logical_refresh_message
 {
 	Oid			dbId;			/* database Oid emitted from */
 	Oid			matviewId;
+
+	uint8		flags; /* boolean flags on refresh */
+
 	Size		prefix_size;	/* length of prefix */
 	Size		role_size;      /* length of the role that executes the refresh command */
 	Size		search_path_size; /* length of the search path */
 	Size		message_size;	  /* size of the message */
+
 	/*
 	 * payload, including null-terminated prefix of length prefix_size
 	 * and null-terminated role of length role_size
@@ -36,7 +44,8 @@ typedef struct xl_logical_refresh_message
 #define SizeOfLogicalRefreshMessage	(offsetof(xl_logical_refresh_message, message))
 
 extern XLogRecPtr LogLogicalRefreshMessage(
-	const char *prefix, Oid roleoid, const char *refresh_message, size_t size, Oid matviewOid);
+	const char *prefix, Oid roleoid, const char *message, Oid matviewOid,
+	bool concurrent, bool skipData, bool isCompleteQuery);
 
 /* RMGR API*/
 #define XLOG_LOGICAL_REFRESH_MESSAGE	0x00

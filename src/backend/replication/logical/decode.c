@@ -661,6 +661,7 @@ logicalrefreshmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	uint8		info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
 	RepOriginId origin_id = XLogRecGetOrigin(r);
 	xl_logical_refresh_message *message;
+	ReorderBufferChange *change;
 
 	if (info != XLOG_LOGICAL_REFRESH_MESSAGE)
 		elog(ERROR, "unexpected RM_LOGICALREFRESHMSG_ID record type: %u", info);
@@ -681,17 +682,27 @@ logicalrefreshmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		FilterByOrigin(ctx, origin_id))
 		return;
 
-	ReorderBufferQueueREFRESHMessage(ctx->reorder, xid, buf->endptr,
-							  message->message,
-							  /* first part of message is prefix */
-							  message->message + message->prefix_size,
-							  /* Second part of message is role*/
-							  message->message + message->prefix_size + message->role_size,
-							  /* Third part of message is search_path */
-							  message->message_size,
-							  message->matviewId,
-							  message->message + message->prefix_size +
-							  message->role_size + message->search_path_size);
+	change = ReorderBufferGetChange(ctx->reorder);
+	change->action = REORDER_BUFFER_CHANGE_REFRESHMESSAGE;
+	if (message->flags & XLL_REFRESH_CONCURR)
+		change->data.refreshmsg.concurrent = true;
+	if (message->flags & XLL_REFRESH_SKIPDATA)
+		change->data.refreshmsg.skipData = true;
+	if (message->flags & XLL_REFRESH_COMPLETEQUERY)
+		change->data.refreshmsg.isCompleteQuery = true;
+	change->data.refreshmsg.prefix = pstrdup(message->message);
+	change->data.refreshmsg.role = pstrdup(message->message + message->prefix_size);
+	change->data.refreshmsg.search_path = pstrdup(message->message + message->prefix_size + message->role_size);
+	change->data.refreshmsg.message_size = message->message_size;
+	change->data.refreshmsg.matviewId = message->matviewId;
+	change->data.refreshmsg.message = palloc(message->message_size);
+
+	memcpy(change->data.refreshmsg.message, 
+		   message->message + message->prefix_size + message->role_size + message->search_path_size,
+		   message->message_size);
+
+	ReorderBufferQueueChange(ctx->reorder, xid,
+							 buf->endptr, change, false);
 }
 
 /*
