@@ -28,6 +28,9 @@
 #define MESSAGE_TRANSACTIONAL (1<<0)
 #define TRUNCATE_CASCADE		(1<<0)
 #define TRUNCATE_RESTART_SEQS	(1<<1)
+#define REFRESH_CONCURR			(1<<0)
+#define REFRESH_SKIPDATA		(1<<1)
+#define REFRESH_COMPLETEQUERY	(1<<2)
 
 static void logicalrep_write_attrs(StringInfo out, Relation rel,
 								   Bitmapset *columns);
@@ -707,6 +710,49 @@ logicalrep_write_ddlmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
 	pq_sendstring(out, search_path);
 	pq_sendint32(out, sz);
 	pq_sendbytes(out, message, sz);
+}
+
+void logicalrep_write_refreshmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
+								  	 Oid rel, bool concurrent, bool skipData,
+								  	 bool isCompleteQuery,
+								  	 const char *message,
+								  	 Size sz)
+{
+	uint8	flags = 0;
+	pq_sendbyte(out, LOGICAL_REP_MSG_REFRESHMESSAGE);
+	/* transaction ID (if not valid, we're not streaming) */
+	if (TransactionIdIsValid(xid))
+		pq_sendint32(out, xid);
+
+	pq_sendint32(out, rel);
+	if (concurrent)
+		flags |= REFRESH_CONCURR;
+	if (skipData)
+		flags |= REFRESH_SKIPDATA;
+	if (isCompleteQuery)
+		flags |= REFRESH_COMPLETEQUERY;
+	pq_sendint8(out, flags);
+
+	pq_sendint32(out, sz);
+	pq_sendbytes(out, message, sz);
+}
+
+LogicalRepRelId logicalrep_read_refreshmessage(StringInfo in, bool *concurrent, bool *skipData,
+											   bool *isCompleteQuery,
+											   const char **message,
+											   Size *sz)
+{
+	Oid 	relid;
+	uint8 	flags;
+	relid = pq_getmsgint(in, 4); /* b param is # bytes */
+	flags = pq_getmsgint(in, 1);
+	*concurrent = (flags & REFRESH_CONCURR) > 0;
+	*skipData = (flags & REFRESH_SKIPDATA) > 0;
+	*isCompleteQuery = (flags & REFRESH_COMPLETEQUERY) > 0;
+
+	*sz = pq_getmsgint(in, 4);
+	*message = pq_getmsgbytes(in, *sz);
+	return relid;
 }
 
 /*

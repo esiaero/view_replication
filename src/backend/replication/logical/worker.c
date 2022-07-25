@@ -143,6 +143,7 @@
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_subscription_rel.h"
 #include "catalog/pg_tablespace.h"
+#include "commands/matview.h"
 #include "commands/subscriptioncmds.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -2475,6 +2476,29 @@ apply_handle_ddlmessage(StringInfo s)
 	apply_execute_sql_command(msg, role, search_path, true);
 }
 
+static void
+apply_handle_refreshmessage(StringInfo s)
+{
+	LogicalRepRelId remote_relid;
+	LogicalRepRelMapEntry *rel;
+	LOCKMODE lockmode;
+	bool			concurrent = false;
+	bool			skipData = false;
+	bool			completeQuery = false;
+	const char *msg;
+	Size sz;
+
+	begin_replication_step();
+
+	remote_relid = logicalrep_read_refreshmessage(s, &concurrent, &skipData, &completeQuery, &msg, &sz);
+	lockmode = concurrent ? ExclusiveLock : AccessExclusiveLock;
+	rel = logicalrep_rel_open(remote_relid, lockmode);
+
+	ExecRefreshGuts(rel->localrel, rel->localreloid, msg, NULL, concurrent, skipData, completeQuery);
+
+	end_replication_step();
+}
+
 /*
  * Add context to the errors produced by apply_execute_sql_command().
  */
@@ -2866,7 +2890,7 @@ apply_dispatch(StringInfo s)
 			break;
 
 		case LOGICAL_REP_MSG_REFRESHMESSAGE:
-			apply_handle_ddlmessage(s);
+			apply_handle_refreshmessage(s);
 			break;
 
 		case LOGICAL_REP_MSG_STREAM_START:

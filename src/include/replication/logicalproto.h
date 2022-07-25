@@ -62,7 +62,7 @@ typedef enum LogicalRepMsgType
 	LOGICAL_REP_MSG_TYPE = 'Y',
 	LOGICAL_REP_MSG_MESSAGE = 'M',
 	LOGICAL_REP_MSG_DDLMESSAGE = 'L',
-	LOGICAL_REP_MSG_REFRESHMESSAGE = 'f', /* R and r both taken? */ 
+	LOGICAL_REP_MSG_REFRESHMESSAGE = 'f', /* R and r both taken */ 
 	LOGICAL_REP_MSG_BEGIN_PREPARE = 'b',
 	LOGICAL_REP_MSG_PREPARE = 'P',
 	LOGICAL_REP_MSG_COMMIT_PREPARED = 'K',
@@ -239,6 +239,15 @@ extern void logicalrep_write_ddlmessage(StringInfo out, TransactionId xid, XLogR
 extern const char *logicalrep_read_ddlmessage(StringInfo in, XLogRecPtr *lsn, const char **prefix,
 											  const char **role, const char **search_path,
 											  Size *sz);
+extern void logicalrep_write_refreshmessage(StringInfo out, TransactionId xid, XLogRecPtr lsn,
+								  Oid rel, bool concurrent, bool skipData,
+								  bool isCompleteQuery,
+								  const char *message,
+								  Size sz);
+extern LogicalRepRelId logicalrep_read_refreshmessage(StringInfo in, bool *concurrent, bool *skipData,
+								bool *isCompleteQuery,
+								const char **message,
+								Size *sz);
 extern void logicalrep_write_rel(StringInfo out, TransactionId xid,
 								 Relation rel, Bitmapset *columns);
 extern LogicalRepRelation *logicalrep_read_rel(StringInfo in);

@@ -32,6 +32,13 @@ logicalrefreshmsg_desc(StringInfo buf, XLogReaderState *record)
 
 		Assert(prefix[xlrec->prefix_size] != '\0');
 
+		if (xlrec->flags & XLL_REFRESH_CONCURR)
+			appendStringInfoString(buf, "concurrent");
+		if (xlrec->flags & XLL_REFRESH_SKIPDATA)
+			appendStringInfoString(buf, "skipData");
+		if (xlrec->flags & XLL_REFRESH_COMPLETEQUERY)
+			appendStringInfoString(buf, "isCompleteQuery");
+
 		appendStringInfo(buf, "prefix \"%s\"; role \"%s\"; search_path \"%s\"; payload (%zu bytes): ",
 						 prefix, role, search_path, xlrec->message_size);
 		/* Write message payload as a series of hex bytes */

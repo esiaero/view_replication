@@ -925,37 +925,6 @@ ReorderBufferQueueDDLMessage(ReorderBuffer *rb, TransactionId xid,
 }
 
 /*
- * A transactional REFRESH message is queued to be processed upon commit
- */
-void
-ReorderBufferQueueREFRESHMessage(ReorderBuffer *rb, TransactionId xid,
-						  XLogRecPtr lsn, const char *prefix,
-						  const char *role, const char *search_path,
-						  Size message_size, Oid matviewId, const char *message)
-{
-	MemoryContext oldcontext;
-	ReorderBufferChange *change;
-
-	Assert(xid != InvalidTransactionId);
-
-	oldcontext = MemoryContextSwitchTo(rb->context);
-
-	change = ReorderBufferGetChange(rb);
-	change->action = REORDER_BUFFER_CHANGE_REFRESHMESSAGE;
-	change->data.refreshmsg.prefix = pstrdup(prefix);
-	change->data.refreshmsg.role = pstrdup(role);
-	change->data.refreshmsg.search_path = pstrdup(search_path);
-	change->data.refreshmsg.message_size = message_size;
-	change->data.refreshmsg.matviewId = matviewId;
-	change->data.refreshmsg.message = palloc(message_size);
-	memcpy(change->data.refreshmsg.message, message, message_size);
-
-	ReorderBufferQueueChange(rb, xid, lsn, change, false);
-
-	MemoryContextSwitchTo(oldcontext);
-}
-
-/*
  * AssertTXNLsnOrder
  *		Verify LSN ordering of transaction lists in the reorderbuffer
  *

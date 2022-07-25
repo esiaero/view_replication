@@ -146,6 +146,9 @@ typedef struct ReorderBufferChange
 		struct
 		{
 			Oid		    matviewId;
+			bool		concurrent;
+			bool		skipData;
+			bool		isCompleteQuery;
 			char	   *prefix;
 			char	   *role;
 			char	   *search_path;
@@ -699,10 +702,6 @@ extern void ReorderBufferQueueMessage(ReorderBuffer *, TransactionId, Snapshot s
 extern void ReorderBufferQueueDDLMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
 										 const char *prefix, const char *role,
 										 const char *search_path, Size message_size, const char *message);
-extern void ReorderBufferQueueREFRESHMessage(ReorderBuffer *, TransactionId, XLogRecPtr lsn,
-											 const char *prefix, const char *role,
-											 const char *search_path, Size message_size,
-											 Oid matviewId, const char *message);
 extern void ReorderBufferCommit(ReorderBuffer *, TransactionId,
 								XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
 								TimestampTz commit_time, RepOriginId origin_id, XLogRecPtr origin_lsn);

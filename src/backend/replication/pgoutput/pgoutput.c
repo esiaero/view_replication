@@ -1867,15 +1867,33 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 	maybe_send_schema(ctx, change, relation, relentry);
 
 	OutputPluginPrepareWrite(ctx, true);
-	/* REFRESH replication based on DDL so just use the command itself, may change in the future */
-	logicalrep_write_ddlmessage(ctx->out,
-									xid,
-									change->lsn,
-									change->data.refreshmsg.prefix,
-									change->data.refreshmsg.role,
-									change->data.refreshmsg.search_path,
-									change->data.refreshmsg.message_size,
-									change->data.refreshmsg.message);
+
+	/* Note that there is additional information contained in the reorderbufferchange. 
+	 * They can be used to call the ddl message command as below:
+	 * logicalrep_write_ddlmessage(ctx->out,
+	 * 							   xid,
+	 * 							   change->lsn,
+	 * 							   change->data.refreshmsg.prefix,
+	 * 							   change->data.refreshmsg.role,
+	 * 							   change->data.refreshmsg.search_path,
+	 * 							   change->data.refreshmsg.message_size,
+	 * 							   change->data.refreshmsg.message);
+	 * The additional information is included since the DDL rep. pipeline may change
+	 * depending on integration with the deparser (pending), so a better solution
+	 * may be discovered for REFRESH.
+	 * Otherwise currently this calls a refresh command directly in worker.c, or if desired
+	 * the current DDL method can be retained and used (as above). Regardless this
+	 * is pending review.
+	 */
+	logicalrep_write_refreshmessage(ctx->out,
+								    xid,
+								    change->lsn,
+								    change->data.refreshmsg.matviewId,
+								    change->data.refreshmsg.concurrent,
+								    change->data.refreshmsg.skipData,
+								    change->data.refreshmsg.isCompleteQuery,
+								    change->data.refreshmsg.message,
+								    change->data.refreshmsg.message_size);
 	OutputPluginWrite(ctx, true);
 }
 
