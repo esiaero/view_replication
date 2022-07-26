@@ -38,6 +38,7 @@
 #include "replication/decode.h"
 #include "replication/ddlmessage.h"
 #include "replication/refreshmessage.h"
+#include "replication/refreshdata.h"
 #include "replication/logical.h"
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -699,6 +700,60 @@ logicalrefreshmsg_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	memcpy(change->data.refreshmsg.message, 
 		   message->message + message->prefix_size + message->role_size + message->search_path_size,
+		   message->message_size);
+
+	ReorderBufferQueueChange(ctx->reorder, xid,
+							 buf->endptr, change, false);
+}
+
+/*
+ * Handle rmgr LOGICALREFRESHDATA_ID records for DecodeRecordIntoReorderBuffer().
+ */
+void
+logicalrefreshdata_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
+{
+	SnapBuild  *builder = ctx->snapshot_builder;
+	XLogReaderState *r = buf->record;
+	TransactionId xid = XLogRecGetXid(r);
+	uint8		info = XLogRecGetInfo(r) & ~XLR_INFO_MASK;
+	RepOriginId origin_id = XLogRecGetOrigin(r);
+	xl_logical_refresh_data *message;
+	ReorderBufferChange *change;
+
+	if (info != XLOG_LOGICAL_REFRESH_DATA)
+		elog(ERROR, "unexpected RM_LOGICALREFRESHDATA_ID record type: %u", info);
+
+	ReorderBufferProcessXid(ctx->reorder, XLogRecGetXid(r), buf->origptr);
+
+	/*
+	 * If we don't have snapshot or we are just fast-forwarding, there is no
+	 * point in decoding refresh messages.
+	 */
+	if (SnapBuildCurrentState(builder) < SNAPBUILD_FULL_SNAPSHOT ||
+		ctx->fast_forward)
+		return;
+
+	message = (xl_logical_refresh_data *) XLogRecGetData(r);
+
+	if (message->dbId != ctx->slot->data.database ||
+		FilterByOrigin(ctx, origin_id))
+		return;
+
+	change = ReorderBufferGetChange(ctx->reorder);
+	change->action = REORDER_BUFFER_CHANGE_REFRESHDATA;
+	if (message->flags & XLL_REFRESH_CONCURR)
+		change->data.refreshdata.concurrent = true;
+	if (message->flags & XLL_REFRESH_SKIPDATA)
+		change->data.refreshdata.skipData = true;
+	if (message->flags & XLL_REFRESH_COMPLETEQUERY)
+		change->data.refreshdata.isCompleteQuery = true;
+	change->data.refreshmsg.prefix = pstrdup(message->message);
+	change->data.refreshmsg.message_size = message->message_size;
+	change->data.refreshmsg.matviewId = message->matviewId;
+	change->data.refreshmsg.message = palloc(message->message_size);
+
+	memcpy(change->data.refreshmsg.message, 
+		   message->message + message->prefix_size,
 		   message->message_size);
 
 	ReorderBufferQueueChange(ctx->reorder, xid,

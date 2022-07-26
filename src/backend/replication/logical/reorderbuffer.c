@@ -540,6 +540,14 @@ ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change,
 				pfree(change->data.refreshmsg.message);
 			change->data.refreshmsg.message = NULL;
 			break;
+		case REORDER_BUFFER_CHANGE_REFRESHDATA:
+			if (change->data.refreshdata.prefix != NULL)
+				pfree(change->data.refreshdata.prefix);
+			change->data.refreshdata.prefix = NULL;
+			if (change->data.refreshdata.message != NULL)
+				pfree(change->data.refreshdata.message);
+			change->data.refreshdata.message = NULL;
+			break;
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
 			if (change->data.inval.invalidations)
 				pfree(change->data.inval.invalidations);
@@ -2052,6 +2060,17 @@ ReorderBufferApplyREFRESHMessage(ReorderBuffer *rb, ReorderBufferTXN *txn,
 		rb->refreshmessage(rb, txn, relation, change);
 }
 
+static inline void
+ReorderBufferApplyREFRESHData(ReorderBuffer *rb, ReorderBufferTXN *txn,
+							  ReorderBufferChange *change, bool streaming,
+							  Relation relation)
+{
+	if (streaming)
+		rb->stream_refreshdata(rb, txn, relation, change);
+	else
+		rb->refreshdata(rb, txn, relation, change);
+}
+
 /*
  * Function to store the command id and snapshot at the end of the current
  * stream so that we can reuse the same while sending the next stream.
@@ -2441,6 +2460,16 @@ ReorderBufferProcessTXN(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 					relation = RelationIdGetRelation(relid);
 					ReorderBufferApplyREFRESHMessage(
+						rb, txn, change, streaming, relation);
+					break;
+				}
+				case REORDER_BUFFER_CHANGE_REFRESHDATA:
+				{
+					Oid relid = change->data.refreshdata.matviewId;
+					Relation relation;
+
+					relation = RelationIdGetRelation(relid);
+					ReorderBufferApplyREFRESHData(
 						rb, txn, change, streaming, relation);
 					break;
 				}
@@ -3913,6 +3942,36 @@ ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 
 				break;
 			}
+		case REORDER_BUFFER_CHANGE_REFRESHDATA:
+			{
+				char	   *data;
+				Size		prefix_size = strlen(change->data.refreshmsg.prefix) + 1;
+
+				sz += prefix_size + change->data.refreshdata.message_size + 
+					  sizeof(Size) + sizeof(Size);
+				ReorderBufferSerializeReserve(rb, sz);
+
+				data = ((char *) rb->outbuf) + sizeof(ReorderBufferDiskChange);
+
+				/* might have been reallocated above */
+				ondisk = (ReorderBufferDiskChange *) rb->outbuf;
+
+				/* write the prefix including the size */
+				memcpy(data, &prefix_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshdata.prefix,
+					   prefix_size);
+				data += prefix_size;
+
+				/* write the message including the size */
+				memcpy(data, &change->data.refreshdata.message_size, sizeof(Size));
+				data += sizeof(Size);
+				memcpy(data, change->data.refreshdata.message,
+					   change->data.refreshdata.message_size);
+				data += change->data.refreshdata.message_size;
+
+				break;
+			}
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
 			{
 				char	   *data;
@@ -4249,6 +4308,13 @@ ReorderBufferChangeSize(ReorderBufferChange *change)
 					change->data.refreshmsg.message_size +
 					sizeof(Size) + sizeof(Size) + sizeof(Size) + sizeof(Size);
 
+				break;
+			}
+		case REORDER_BUFFER_CHANGE_REFRESHDATA:
+			{
+				Size		prefix_size = strlen(change->data.refreshmsg.prefix) + 1;
+				sz += prefix_size + change->data.refreshdata.message_size + 
+					  sizeof(Size) + sizeof(Size);
 				break;
 			}
 		case REORDER_BUFFER_CHANGE_INVALIDATION:
@@ -4599,6 +4665,28 @@ ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
 				memcpy(change->data.refreshmsg.search_path, data, search_path_size);
 				Assert(change->data.refreshmsg.search_path[search_path_size - 1] == '\0');
 				data += search_path_size;
+
+				/* read the message */
+				memcpy(&change->data.msg.message_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.msg.message = MemoryContextAlloc(rb->context,
+															  change->data.msg.message_size);
+				memcpy(change->data.msg.message, data,
+					   change->data.msg.message_size);
+				data += change->data.msg.message_size;
+
+				break;
+			}
+		case REORDER_BUFFER_CHANGE_REFRESHDATA:
+			{
+				Size		prefix_size;
+				/* read prefix */
+				memcpy(&prefix_size, data, sizeof(Size));
+				data += sizeof(Size);
+				change->data.refreshdata.prefix = MemoryContextAlloc(rb->context, prefix_size);
+				memcpy(change->data.refreshdata.prefix, data, prefix_size);
+				Assert(change->data.refreshdata.prefix[prefix_size - 1] == '\0');
+				data += prefix_size;
 
 				/* read the message */
 				memcpy(&change->data.msg.message_size, data, sizeof(Size));

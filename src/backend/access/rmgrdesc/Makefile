@@ -21,6 +21,7 @@ OBJS = \
 	logicalmsgdesc.o \
 	logicalddlmsgdesc.o \
 	logicalrefreshmsgdesc.o \
+	logicalrefreshdatadesc.o \
 	mxactdesc.o \
 	nbtdesc.o \
 	relmapdesc.o \

@@ -66,7 +66,8 @@ typedef enum ReorderBufferChangeType
 	REORDER_BUFFER_CHANGE_INTERNAL_SPEC_CONFIRM,
 	REORDER_BUFFER_CHANGE_INTERNAL_SPEC_ABORT,
 	REORDER_BUFFER_CHANGE_TRUNCATE,
-	REORDER_BUFFER_CHANGE_REFRESHMESSAGE
+	REORDER_BUFFER_CHANGE_REFRESHMESSAGE,
+	REORDER_BUFFER_CHANGE_REFRESHDATA
 } ReorderBufferChangeType;
 
 /* forward declaration */
@@ -155,6 +156,18 @@ typedef struct ReorderBufferChange
 			Size		message_size;
 			char	   *message;
 		}			refreshmsg;
+
+		/* REFRESH Message for data. */
+		struct
+		{
+			Oid		    matviewId;
+			bool		concurrent;
+			bool		skipData;
+			bool		isCompleteQuery;
+			char	   *prefix;
+			Size		message_size;
+			char	   *message;
+		}			refreshdata;
 
 		/* New snapshot, set when action == *_INTERNAL_SNAPSHOT */
 		Snapshot	snapshot;
@@ -471,6 +484,10 @@ typedef void (*ReorderBufferREFRESHMessageCB) (ReorderBuffer *rb,
 											   ReorderBufferTXN *txn,
 											   Relation relation,
 											   ReorderBufferChange *change);
+typedef void (*ReorderBufferREFRESHDataCB) (ReorderBuffer *rb,
+											ReorderBufferTXN *txn,
+											Relation relation,
+											ReorderBufferChange *change);
 
 /* begin prepare callback signature */
 typedef void (*ReorderBufferBeginPrepareCB) (ReorderBuffer *rb,
@@ -555,6 +572,11 @@ typedef void (*ReorderBufferStreamREFRESHMessageCB) (
 												 ReorderBufferTXN *txn,
 												 Relation relation,
 												 ReorderBufferChange *change);
+typedef void (*ReorderBufferStreamREFRESHDataCB) (
+												 ReorderBuffer *rb,
+												 ReorderBufferTXN *txn,
+												 Relation relation,
+												 ReorderBufferChange *change);
 
 /* stream truncate callback signature */
 typedef void (*ReorderBufferStreamTruncateCB) (
@@ -603,6 +625,7 @@ struct ReorderBuffer
 	ReorderBufferMessageCB message;
 	ReorderBufferDDLMessageCB ddlmessage;
 	ReorderBufferREFRESHMessageCB refreshmessage;
+	ReorderBufferREFRESHDataCB refreshdata;
 
 	/*
 	 * Callbacks to be called when streaming a transaction at prepare time.
@@ -625,6 +648,7 @@ struct ReorderBuffer
 	ReorderBufferStreamDDLMessageCB stream_ddlmessage;
 	ReorderBufferStreamTruncateCB stream_truncate;
 	ReorderBufferStreamREFRESHMessageCB stream_refreshmessage;
+	ReorderBufferStreamREFRESHDataCB stream_refreshdata;
 
 	/*
 	 * Pointer that will be passed untouched to the callbacks.

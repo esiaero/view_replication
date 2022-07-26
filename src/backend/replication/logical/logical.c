@@ -79,6 +79,9 @@ static void ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 								  Size message_size, const char *message);
 static void refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 								  	  Relation relation, ReorderBufferChange *change);
+static void refreshdata_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+								   Relation relation, ReorderBufferChange *change);
+
 
 /* streaming callbacks */
 static void stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
@@ -102,6 +105,8 @@ static void stream_ddlmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN 
 										 Size message_size, const char *message);
 static void stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 								  			 Relation relation, ReorderBufferChange *change);
+static void stream_refreshdata_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+								  		  Relation relation, ReorderBufferChange *change);
 static void stream_truncate_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 									   int nrelations, Relation relations[], ReorderBufferChange *change);
 
@@ -232,6 +237,7 @@ StartupDecodingContext(List *output_plugin_options,
 	ctx->reorder->message = message_cb_wrapper;
 	ctx->reorder->ddlmessage = ddlmessage_cb_wrapper;
 	ctx->reorder->refreshmessage = refreshmessage_cb_wrapper;
+	ctx->reorder->refreshdata = refreshdata_cb_wrapper;
 
 	/*
 	 * To support streaming, we require start/stop/abort/commit/change
@@ -250,6 +256,7 @@ StartupDecodingContext(List *output_plugin_options,
 		(ctx->callbacks.stream_message_cb != NULL) ||
 		(ctx->callbacks.stream_ddlmessage_cb != NULL) ||
 		(ctx->callbacks.stream_refreshmessage_cb != NULL) || 
+		(ctx->callbacks.stream_refreshdata_cb != NULL) ||
 		(ctx->callbacks.stream_truncate_cb != NULL);
 
 	/*
@@ -269,6 +276,7 @@ StartupDecodingContext(List *output_plugin_options,
 	ctx->reorder->stream_message = stream_message_cb_wrapper;
 	ctx->reorder->stream_ddlmessage = stream_ddlmessage_cb_wrapper;
 	ctx->reorder->stream_refreshmessage = stream_refreshmessage_cb_wrapper;
+	ctx->reorder->stream_refreshdata = stream_refreshdata_cb_wrapper;
 	ctx->reorder->stream_truncate = stream_truncate_cb_wrapper;
 
 
@@ -1310,6 +1318,40 @@ refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 }
 
 static void
+refreshdata_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+						  Relation relation, ReorderBufferChange *change)
+{
+	LogicalDecodingContext *ctx = cache->private_data;
+	LogicalErrorCallbackState state;
+	ErrorContextCallback errcallback;
+
+	Assert(!ctx->fast_forward);
+
+	if (ctx->callbacks.refreshdata_cb == NULL)
+		return;
+
+	/* Push callback + info on the error context stack */
+	state.ctx = ctx;
+	state.callback_name = "refreshdata";
+	state.report_location = change->lsn;
+	errcallback.callback = output_plugin_error_callback;
+	errcallback.arg = (void *) &state;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
+	/* set output state */
+	ctx->accept_writes = true;
+	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+	ctx->write_location = change->lsn;
+
+	/* do the actual work: call callback */
+	ctx->callbacks.refreshdata_cb(ctx, txn, relation, change);
+
+	/* Pop the error context stack */
+	error_context_stack = errcallback.previous;
+}
+
+static void
 stream_start_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 						XLogRecPtr first_lsn)
 {
@@ -1698,6 +1740,44 @@ stream_refreshmessage_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
 
 	/* do the actual work: call callback */
 	ctx->callbacks.stream_refreshmessage_cb(ctx, txn, relation, change);
+
+	/* Pop the error context stack */
+	error_context_stack = errcallback.previous;
+}
+
+static void
+stream_refreshdata_cb_wrapper(ReorderBuffer *cache, ReorderBufferTXN *txn,
+								 Relation relation, ReorderBufferChange *change)
+{
+	LogicalDecodingContext *ctx = cache->private_data;
+	LogicalErrorCallbackState state;
+	ErrorContextCallback errcallback;
+
+	Assert(!ctx->fast_forward);
+
+	/* We're only supposed to call this when streaming is supported. */
+	Assert(ctx->streaming);
+
+	/* this callback is optional */
+	if (ctx->callbacks.stream_refreshdata_cb == NULL)
+		return;
+
+	/* Push callback + info on the error context stack */
+	state.ctx = ctx;
+	state.callback_name = "stream_refreshdata";
+	state.report_location = change->lsn;
+	errcallback.callback = output_plugin_error_callback;
+	errcallback.arg = (void *) &state;
+	errcallback.previous = error_context_stack;
+	error_context_stack = &errcallback;
+
+	/* set output state */
+	ctx->accept_writes = true;
+	ctx->write_xid = txn != NULL ? txn->xid : InvalidTransactionId;
+	ctx->write_location = change->lsn;
+
+	/* do the actual work: call callback */
+	ctx->callbacks.stream_refreshdata_cb(ctx, txn, relation, change);
 
 	/* Pop the error context stack */
 	error_context_stack = errcallback.previous;

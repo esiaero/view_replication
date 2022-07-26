@@ -61,6 +61,9 @@ static void pgoutput_ddlmessage(LogicalDecodingContext *ctx,
 static void pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 								ReorderBufferTXN *txn,
 								Relation relation, ReorderBufferChange *change);
+static void pgoutput_refreshdata(LogicalDecodingContext *ctx,
+								ReorderBufferTXN *txn,
+								Relation relation, ReorderBufferChange *change);
 static bool pgoutput_origin_filter(LogicalDecodingContext *ctx,
 								   RepOriginId origin_id);
 static void pgoutput_begin_prepare_txn(LogicalDecodingContext *ctx,
@@ -265,6 +268,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->message_cb = pgoutput_message;
 	cb->ddlmessage_cb = pgoutput_ddlmessage;
 	cb->refreshmessage_cb = pgoutput_refreshmessage;
+	cb->refreshdata_cb = pgoutput_refreshdata;
 	cb->commit_cb = pgoutput_commit_txn;
 
 	cb->begin_prepare_cb = pgoutput_begin_prepare_txn;
@@ -283,6 +287,7 @@ _PG_output_plugin_init(OutputPluginCallbacks *cb)
 	cb->stream_message_cb = pgoutput_message;
 	cb->stream_ddlmessage_cb = pgoutput_ddlmessage;
 	cb->stream_refreshmessage_cb = pgoutput_refreshmessage;
+	cb->stream_refreshdata_cb = pgoutput_refreshdata;
 	cb->stream_truncate_cb = pgoutput_truncate;
 	/* transaction streaming - two-phase commit */
 	cb->stream_prepare_cb = pgoutput_stream_prepare_txn;
@@ -1868,8 +1873,94 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 
 	OutputPluginPrepareWrite(ctx, true);
 
-	/* TODO: consider just using one, right now it looks confusing */
-	if (relentry->pubactions.pubrefresh_data)
+	/* Note that there is additional information contained in the reorderbufferchange. 
+	 * They can be used to call a refresh command as below:
+	 * logicalrep_write_refresh(ctx->out,
+	 * 							 xid,
+	 * 							 change->lsn,
+	 * 							 change->data.refreshmsg.matviewId,
+	 * 							 change->data.refreshmsg.concurrent,
+	 * 							 change->data.refreshmsg.skipData,
+	 * 							 change->data.refreshmsg.isCompleteQuery,
+	 * 							 change->data.refreshmsg.message,
+	 * 							 change->data.refreshmsg.message_size);
+	 * The above is only an example; the correct write/read & worker commands 
+	 * must be implemented. See logicalrep_write/read_refreshdata and the worker for them,
+	 * apply_handle_refreshdata() for implementation example.
+	 * 
+	 * The additional information is included since the below DDL rep. pipeline may change.
+	 * Depending on integration with the deparser (pending), a better solution
+	 * may be discovered for REFRESH; if not the above method can be used (or if desired 
+	 * the current DDL method can be retained and additional info removed). Regardless this
+	 * is pending review.
+	 */
+	logicalrep_write_ddlmessage(ctx->out,
+								xid,
+								change->lsn,
+								change->data.refreshmsg.prefix,
+								change->data.refreshmsg.role,
+								change->data.refreshmsg.search_path,
+								change->data.refreshmsg.message_size,
+								change->data.refreshmsg.message);
+	OutputPluginWrite(ctx, true);
+}
+
+static void
+pgoutput_refreshdata(LogicalDecodingContext *ctx,
+						ReorderBufferTXN *txn,
+						Relation relation, ReorderBufferChange *change)
+{
+	PGOutputData *data = (PGOutputData *) ctx->output_plugin_private;
+	TransactionId xid = InvalidTransactionId;
+	ListCell *lc;
+	PGOutputTxnData *txndata;
+	RelationSyncEntry *relentry;
+
+	/* Reload publications if needed before use. */
+	if (!publications_valid)
+	{
+		MemoryContext oldctx = MemoryContextSwitchTo(CacheMemoryContext);
+		if (data->publications)
+			list_free_deep(data->publications);
+
+		data->publications = LoadPublications(data->publication_names);
+		MemoryContextSwitchTo(oldctx);
+		publications_valid = true;
+	}
+
+	/*
+	 * Check if ddl replication is turned on for the publication - needed for 
+	 * materialized views? Likely YES until DDL deparser changes are added
+	 */
+	foreach(lc, data->publications)
+	{
+		Publication *pub = (Publication *) lfirst(lc);
+		/* TODO need to check relid for table level DDLs */
+		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
+			return;
+	}
+
+	/* Remember the xid for the message in streaming mode. See pgoutput_change. */
+	if (in_streaming)
+		xid = txn->xid;
+
+	relentry = get_rel_sync_entry(data, relation);
+
+	if (!relentry->pubactions.pubrefresh)
+		return;
+
+	/* Output BEGIN if we haven't yet. Avoid for non-transactional messages. */
+	txndata = (PGOutputTxnData *) txn->output_plugin_private;
+
+	/* Send BEGIN if we haven't yet */
+	if (txndata && !txndata->sent_begin_txn)
+		pgoutput_send_begin(ctx, txn);
+
+	maybe_send_schema(ctx, change, relation, relentry);
+
+	OutputPluginPrepareWrite(ctx, true);
+
+	//if (relentry->pubactions.pubrefresh_data)
 		logicalrep_write_refreshdata(ctx->out,
 									 xid,
 									 change->lsn,
@@ -1879,15 +1970,6 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 									 change->data.refreshmsg.isCompleteQuery,
 									 change->data.refreshmsg.message,
 									 change->data.refreshmsg.message_size);
-	else	/* REFRESH replication based on DDL so just use the command itself, may change in the future */
-		logicalrep_write_ddlmessage(ctx->out,
-										xid,
-										change->lsn,
-										change->data.refreshmsg.prefix,
-										change->data.refreshmsg.role,
-										change->data.refreshmsg.search_path,
-										change->data.refreshmsg.message_size,
-										change->data.refreshmsg.message);
 	OutputPluginWrite(ctx, true);
 }
 

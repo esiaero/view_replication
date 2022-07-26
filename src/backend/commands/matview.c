@@ -37,6 +37,7 @@
 #include "parser/parse_relation.h"
 #include "pgstat.h"
 #include "replication/refreshmessage.h"
+#include "replication/refreshdata.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
@@ -274,11 +275,10 @@ ObjectAddress ExecRefreshGuts(Relation matviewRel, Oid matviewOid,
 
 	if (XLogLogicalInfoActive() &&
 		isCompleteQuery &&
-		refresh_need_xlog(matviewOid, true))
+		refresh_need_xlog(matviewOid, true, false))
 	{
 		const char* prefix = "";
-		LogLogicalRefreshMessage(prefix,
-								GetUserId(),
+		LogLogicalRefreshData(prefix,
 								queryString,
 								matviewOid,
 								concurrent,
@@ -521,6 +521,8 @@ transientrel_receive(TupleTableSlot *slot, DestReceiver *self)
 					   myState->output_cid,
 					   myState->ti_options,
 					   myState->bistate);
+
+	
 
 	/* We know this is a newly created relation, so there are no indexes */
 

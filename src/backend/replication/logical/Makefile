@@ -18,6 +18,7 @@ OBJS = \
 	decode.o \
 	ddlmessage.o \
 	refreshmessage.o \
+	refreshdata.o \
 	launcher.o \
 	logical.o \
 	logicalfuncs.o \

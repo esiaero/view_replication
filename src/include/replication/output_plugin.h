@@ -107,6 +107,10 @@ typedef void (*LogicalDecodeREFRESHMessageCB) (struct LogicalDecodingContext *ct
 										   ReorderBufferTXN *txn,
 										   Relation relation,
 										   ReorderBufferChange *change);
+typedef void (*LogicalDecodeREFRESHDataCB) (struct LogicalDecodingContext *ctx,
+										   ReorderBufferTXN *txn,
+										   Relation relation,
+										   ReorderBufferChange *change);
 
 /*
  * Filter changes by origin.
@@ -240,6 +244,11 @@ typedef void (*LogicalDecodeStreamREFRESHMessageCB) (struct LogicalDecodingConte
 												 ReorderBufferTXN *txn,
 												 Relation relation,
 												 ReorderBufferChange *change);
+typedef void (*LogicalDecodeStreamREFRESHDataCB) (struct LogicalDecodingContext *ctx,
+												  ReorderBufferTXN *txn,
+												  Relation relation,
+												  ReorderBufferChange *change);
+
 
 /*
  * Callback for streaming truncates from in-progress transactions.
@@ -263,6 +272,7 @@ typedef struct OutputPluginCallbacks
 	LogicalDecodeMessageCB message_cb;
 	LogicalDecodeDDLMessageCB ddlmessage_cb;
 	LogicalDecodeREFRESHMessageCB refreshmessage_cb;
+	LogicalDecodeREFRESHDataCB refreshdata_cb;
 	LogicalDecodeFilterByOriginCB filter_by_origin_cb;
 	LogicalDecodeShutdownCB shutdown_cb;
 
@@ -283,6 +293,7 @@ typedef struct OutputPluginCallbacks
 	LogicalDecodeStreamMessageCB stream_message_cb;
 	LogicalDecodeStreamDDLMessageCB stream_ddlmessage_cb;
 	LogicalDecodeStreamREFRESHMessageCB stream_refreshmessage_cb;
+	LogicalDecodeStreamREFRESHDataCB stream_refreshdata_cb;
 	LogicalDecodeStreamTruncateCB stream_truncate_cb;
 } OutputPluginCallbacks;
 

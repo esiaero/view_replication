@@ -175,6 +175,6 @@ extern Bitmapset *pub_collist_to_bitmapset(Bitmapset *columns, Datum pubcols,
 extern Oid	get_publication_oid(const char *pubname, bool missing_ok);
 extern char *get_publication_name(Oid pubid, bool missing_ok);
 extern bool ddl_need_xlog(Oid relid, bool forAllTabPubOnly);
-extern bool refresh_need_xlog(Oid relid, bool forAllTabPubOnly);
+extern bool refresh_need_xlog(Oid relid, bool forAllTabPubOnly, bool need_data);
 
 #endif							/* PG_PUBLICATION_H */

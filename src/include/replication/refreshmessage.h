@@ -1,6 +1,12 @@
 /*-------------------------------------------------------------------------
  * refreshmessage.h
  *	   Exports from replication/logical/refreshmessage.c
+ *	   This class is designed to be highly analogous to ddlmessage.h
+ *     However there are sufficient modifications so that a direct 
+ *     call to refresh instead of a portal (as with DDL) is possible,
+ *     if desired. 
+ * 
+ *     See refreshdata.h (record for data refreshes) for further details.
  *
  * Copyright (c) 2022, PostgreSQL Global Development Group
  *
