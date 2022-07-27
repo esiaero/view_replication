@@ -143,6 +143,7 @@
 #include "catalog/pg_subscription.h"
 #include "catalog/pg_subscription_rel.h"
 #include "catalog/pg_tablespace.h"
+#include "commands/copy.h"
 #include "commands/matview.h"
 #include "commands/subscriptioncmds.h"
 #include "commands/tablecmds.h"
@@ -2476,11 +2477,86 @@ apply_handle_ddlmessage(StringInfo s)
 	apply_execute_sql_command(msg, role, search_path, true);
 }
 
+
+// all these vars and copy_read_data copied from tablesync.c 
+static StringInfo copybuf = NULL;
+struct WalReceiverConn *LogRepWorkerWalRcvConn2;
+
+static int
+copy_read_data(void *outbuf, int minread, int maxread)
+{
+	int			bytesread = 0;
+	int			avail;
+
+	/* If there are some leftover data from previous read, use it. */
+	avail = copybuf->len - copybuf->cursor;
+	if (avail)
+	{
+		if (avail > maxread)
+			avail = maxread;
+		memcpy(outbuf, &copybuf->data[copybuf->cursor], avail);
+		copybuf->cursor += avail;
+		maxread -= avail;
+		bytesread += avail;
+	}
+
+	while (maxread > 0 && bytesread < minread)
+	{
+		pgsocket	fd = PGINVALID_SOCKET;
+		int			len;
+		char	   *buf = NULL;
+
+		for (;;)
+		{
+			/* Try read the data. */
+			len = walrcv_receive(LogRepWorkerWalRcvConn2, &buf, &fd);
+
+			CHECK_FOR_INTERRUPTS();
+
+			if (len == 0)
+				break;
+			else if (len < 0)
+				return bytesread;
+			else
+			{
+				/* Process the data */
+				copybuf->data = buf;
+				copybuf->len = len;
+				copybuf->cursor = 0;
+
+				avail = copybuf->len - copybuf->cursor;
+				if (avail > maxread)
+					avail = maxread;
+				memcpy(outbuf, &copybuf->data[copybuf->cursor], avail);
+				outbuf = (void *) ((char *) outbuf + avail);
+				copybuf->cursor += avail;
+				maxread -= avail;
+				bytesread += avail;
+			}
+
+			if (maxread <= 0 || bytesread >= minread)
+				return bytesread;
+		}
+
+		/*
+		 * Wait for more data or latch.
+		 */
+		(void) WaitLatchOrSocket(MyLatch,
+								 WL_SOCKET_READABLE | WL_LATCH_SET |
+								 WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+								 fd, 1000L, WAIT_EVENT_LOGICAL_SYNC_DATA);
+
+		ResetLatch(MyLatch);
+	}
+
+	return bytesread;
+}
+
 static void
 apply_handle_refreshdata(StringInfo s)
 {
 	LogicalRepRelId remote_relid;
-	LogicalRepRelMapEntry *rel;
+	LogicalRepRelMapEntry *relmapentry;
 	LOCKMODE lockmode;
 	bool			concurrent = false;
 	bool			skipData = false;
@@ -2488,15 +2564,101 @@ apply_handle_refreshdata(StringInfo s)
 	const char *msg;
 	Size sz;
 
+	StringInfoData cmd;
+	WalRcvExecResult *res;
+
+	char	   *slotname;
+	char	   *err;
+	// List	   *qual = NIL;
+	ParseState *pstate;
+	List	   *attnamelist = NIL;
+	int			i;
+	CopyFromState cstate;
+	TimeLineID	tli;
+
+	maybe_reread_subscription();
+
 	begin_replication_step();
 
 	remote_relid = logicalrep_read_refreshdata(s, &concurrent, &skipData, &completeQuery, &msg, &sz);
 	lockmode = concurrent ? ExclusiveLock : AccessExclusiveLock;
-	rel = logicalrep_rel_open(remote_relid, lockmode);
+	relmapentry = logicalrep_rel_open(remote_relid, lockmode);
 
-	ExecRefreshGuts(rel->localrel, rel->localreloid, msg, NULL, concurrent, skipData, completeQuery);
+	/* below all analogous to copy_table in tablesync.c */
+	initStringInfo(&cmd);
+	appendStringInfoString(&cmd, "COPY (SELECT ");
+	for (int i = 0; i < relmapentry->remoterel.natts; i++)
+	{
+		appendStringInfoString(&cmd, quote_identifier(relmapentry->remoterel.attnames[i]));
+		if (i < relmapentry->remoterel.natts - 1)
+			appendStringInfoString(&cmd, ", ");
+	}
+	appendStringInfoString(&cmd, " FROM ");
+	if (relmapentry->remoterel.relkind == RELKIND_RELATION)
+		appendStringInfoString(&cmd, "ONLY ");
+	appendStringInfoString(&cmd, quote_qualified_identifier(relmapentry->remoterel.nspname, relmapentry->remoterel.relname));
+	// if (qual != NIL) // qual seems security related - need to look into it more
+	// {
+	// 	ListCell   *lc;
+	// 	char	   *q = strVal(linitial(qual));
+
+	// 	appendStringInfo(&cmd, " WHERE %s", q);
+	// 	for_each_from(lc, qual, 1)
+	// 	{
+	// 		q = strVal(lfirst(lc));
+	// 		appendStringInfo(&cmd, " OR %s", q);
+	// 	}
+	// 	list_free_deep(qual);
+	// }
+	appendStringInfoString(&cmd, ") TO STDOUT");
+
+	//this constructs a COPY a,b, FROM 
+	// this comment to read whats in cmd.data
+	// ereport(ERROR,
+	// 			(errcode(ERRCODE_CONNECTION_FAILURE),
+	// 			 errmsg("could not start initial co %s",
+	// 					cmd.data)));
+
+	slotname = (char *) palloc(NAMEDATALEN);
+	ReplicationSlotNameForTablesync(MySubscription->oid,
+									MyLogicalRepWorker->relid,
+									slotname,
+									NAMEDATALEN);
+	LogRepWorkerWalRcvConn2 = walrcv_connect(MySubscription->conninfo, true, slotname, &err);
+	if (LogRepWorkerWalRcvConn2 == NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not connect to the publisher: %s", err)));
+
+	/* set up conn2 since conn1 would be busy (with this very command?) */
+	res = walrcv_exec(LogRepWorkerWalRcvConn2, cmd.data, 0, NULL);
+	pfree(cmd.data);
+	if (res->status != WALRCV_OK_COPY_OUT)
+		ereport(ERROR,
+				(errcode(ERRCODE_CONNECTION_FAILURE),
+				 errmsg("could not start initial contents copy for table \"%s.%s\": %s",
+						relmapentry->remoterel.nspname, relmapentry->remoterel.relname, res->err)));
+	walrcv_clear_result(res);
+
+
+	copybuf = makeStringInfo();
+	pstate = make_parsestate(NULL);
+	for (i = 0; i < relmapentry->remoterel.natts; i++)
+	{
+		attnamelist = lappend(attnamelist,
+							  makeString(relmapentry->remoterel.attnames[i]));
+	}
+	cstate = BeginCopyFrom(pstate, relmapentry->localrel, NULL, NULL, false, copy_read_data, attnamelist, NIL);
+	/* Do the copy */
+	(void) CopyFrom(cstate);
+	logicalrep_rel_close(relmapentry, NoLock);
+
+	// traditional refresh
+	//ExecRefreshGuts(relmapentry->localrel, relmapentry->localreloid, msg, NULL, concurrent, skipData, completeQuery);
 
 	end_replication_step();
+
+	walrcv_endstreaming(LogRepWorkerWalRcvConn2, &tli);
 }
 
 /*
