@@ -128,7 +128,9 @@ $pub_result = $node_publisher->safe_psql('postgres', $list_views);
 $sub_result = $node_subscriber->safe_psql('postgres', $list_views);
 is($sub_result, qq($pub_result), 'DROP VIEW vista replicated successfully');
 
+pass "basic view replication DDL tests (for all tables) passed";
 
-#tests:009_matviews.pl need to change (presumably 009_matviews.pl)
-# consider checking materialized view behavior during inital synchronization
+$node_subscriber->stop;
+$node_publisher->stop;
+
 done_testing();

@@ -5,6 +5,9 @@ use PostgreSQL::Test::Cluster;
 use PostgreSQL::Test::Utils;
 use Test::More;
 
+# TODO: 009_matviews.pl will likely need to change or be deleted - consider
+# community feedback?
+
 # create publisher node
 my $node_publisher = PostgreSQL::Test::Cluster->new('publisher');
 $node_publisher->init(allows_streaming => 'logical');
@@ -57,5 +60,11 @@ my $sub_result_2 = $node_subscriber_2->safe_psql('postgres', $check_view_rows);
 is($pub_result, qq(1|2\n8|9), 'Sanity check');
 is($sub_result, qq(1|2\n8|9), 'REFRESH replicated');
 is($sub_result_2, qq(1|2), 'REFRESH should not have been replicated'); #1|2\n8|9
+
+pass "basic material view (REFRESH) replication tests passed";
+
+$node_subscriber->stop;
+$node_subscriber_2->stop;
+$node_publisher->stop;
 
 done_testing();
