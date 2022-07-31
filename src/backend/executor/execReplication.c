@@ -650,9 +650,6 @@ CheckSubscriptionRelkind(char relkind, const char *nspname,
 {
 	/* 
 	 * Possibly add view later if decoupled from ddl rep. At the moment only MATVIEW_DATA is decoupled. 
-	 * The error check (errdetail_relkind_not_supported) still has a case for MATVIEW_DATA since it is
-	 * called in many other places; this case may eventually be removed pending further examination and
-	 * how/if view replication imitates any DDL replication changes.
 	 */
 	if (relkind != RELKIND_RELATION && relkind != RELKIND_PARTITIONED_TABLE && 
 		relkind != RELKIND_MATVIEW) 

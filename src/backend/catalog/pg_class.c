@@ -19,10 +19,6 @@
 /*
  * Issue an errdetail() informing that the relkind is not supported for this
  * operation.
- * 
- * Right now cases for RELKIND_[MAT]VIEW exist, but at some point (may)
- * be removed depending on how general DDL replication changes and how/if
- * view replication imitates it. (see execReplication CheckSubscriptionRelkind())
  */
 int
 errdetail_relkind_not_supported(char relkind)
