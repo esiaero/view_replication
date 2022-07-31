@@ -35,8 +35,10 @@
 #include "commands/defrem.h"
 #include "commands/event_trigger.h"
 #include "commands/publicationcmds.h"
+#include "commands/view.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/parse_clause.h"
 #include "parser/parse_collate.h"
@@ -68,6 +70,7 @@ typedef struct rf_context
 
 static List *OpenRelIdList(List *relids);
 static List *OpenTableList(List *tables);
+static List *OpenAndParseViewList(List *views, List **tables);
 static void CloseTableList(List *rels);
 static void LockSchemaList(List *schemalist);
 static void PublicationAddTables(Oid pubid, List *rels, bool if_not_exists,
@@ -238,7 +241,7 @@ parse_publication_options(ParseState *pstate,
  */
 static void
 ObjectsInPublicationToOids(List *pubobjspec_list, ParseState *pstate,
-						   List **rels, List **schemas)
+						   List **rels, List **schemas, List **views)
 {
 	ListCell   *cell;
 	PublicationObjSpec *pubobj;
@@ -255,6 +258,9 @@ ObjectsInPublicationToOids(List *pubobjspec_list, ParseState *pstate,
 
 		switch (pubobj->pubobjtype)
 		{
+			case PUBLICATIONOBJ_VIEW: /* rely on pubtable but for view its a view */
+				*views = lappend(*views, pubobj->pubtable);
+				break;
 			case PUBLICATIONOBJ_TABLE:
 				*rels = lappend(*rels, pubobj->pubtable);
 				break;
@@ -839,6 +845,7 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 	AclResult	aclresult;
 	List	   *relations = NIL;
 	List	   *schemaidlist = NIL;
+	List	   *views = NIL;
 
 	/* must have CREATE privilege on database */
 	aclresult = pg_database_aclcheck(MyDatabaseId, GetUserId(), ACL_CREATE);
@@ -925,13 +932,33 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 	else
 	{
 		ObjectsInPublicationToOids(stmt->pubobjects, pstate, &relations,
-								   &schemaidlist);
+								   &schemaidlist, &views);
 
 		/* FOR ALL TABLES IN SCHEMA requires superuser */
 		if (list_length(schemaidlist) > 0 && !superuser())
 			ereport(ERROR,
 					errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 					errmsg("must be superuser to create FOR ALL TABLES IN SCHEMA publication"));
+
+		/* Parse views first to append dependent objs to **relations */
+		if (list_length(views) > 0)
+		{
+			List 		*rels;
+			rels = OpenAndParseViewList(views, &relations);
+			/* 
+			 * Note views are not included  with the FOR ALL TABLES IN SCHEMA cmd, 
+			 * nor is there a FOR ALL VIEWS IN SCHEMA (for now at least).
+			 * 
+			 * CheckObjSchemaNotAlreadyInPublication(rels, schemaidlist, PUBLICATIONOBJ_VIEW);
+			 */ 
+			TransformPubWhereClauses(rels, pstate->p_sourcetext,
+									 publish_via_partition_root);
+			CheckPubRelationColumnList(rels, pstate->p_sourcetext,
+									   publish_via_partition_root);
+			/* (we're adding the views, despite the func name call) */
+			PublicationAddTables(puboid, rels, true, NULL);
+			CloseTableList(rels);
+		}
 
 		if (list_length(relations) > 0)
 		{
@@ -1517,10 +1544,11 @@ AlterPublication(ParseState *pstate, AlterPublicationStmt *stmt)
 	{
 		List	   *relations = NIL;
 		List	   *schemaidlist = NIL;
+		List	   *views = NIL;
 		Oid			pubid = pubform->oid;
 
 		ObjectsInPublicationToOids(stmt->pubobjects, pstate, &relations,
-								   &schemaidlist);
+								   &schemaidlist, &views);
 
 		CheckAlterPublication(stmt, tup, relations, schemaidlist);
 
@@ -1840,6 +1868,90 @@ OpenTableList(List *tables)
 
 	list_free(relids);
 	list_free(relids_with_rf);
+
+	return rels;
+}
+
+static void ParseViewForDependencies(Oid viewoid, ViewRecurse_context *context)
+{
+	ListCell 			*lc;
+	List				*temp = NIL;
+
+	/* skip the view oid if it has been seen before */
+	if (list_member_oid(context->views, viewoid))
+		return;
+
+	context->ancestor_views = temp;
+	context->currviewoid = viewoid;
+	ViewRecurse(context);
+	context->ancestor_views = NIL;
+
+	foreach(lc, temp)
+	{
+		Oid		dependentViewOid = lfirst_oid(lc);
+		ParseViewForDependencies(dependentViewOid, context);
+	}
+	list_free(temp);
+}
+
+static List *
+OpenAndParseViewList(List *views, List **tables)
+{
+	List	   			*relids = NIL;
+	List	   			*rels = NIL;
+	ListCell   			*lc;
+	ViewRecurse_context context;
+	context.views = NIL;
+	context.tables = NIL;
+
+	foreach(lc, views)
+	{
+		PublicationTable   *t = lfirst_node(PublicationTable, lc);
+		Relation			view;
+		Oid					viewid;
+		PublicationRelInfo *pub_rel;
+
+		/* Allow query cancel in case this takes a long time */
+		CHECK_FOR_INTERRUPTS();
+
+		view = table_openrv(t->relation, ShareUpdateExclusiveLock);
+		viewid = RelationGetRelid(view);
+
+		/* Filter out duplicates (O(N^2)) */
+		if (list_member_oid(relids, viewid))
+		{
+			table_close(view, ShareUpdateExclusiveLock);
+			continue;
+		}
+
+		pub_rel = palloc(sizeof(PublicationRelInfo));
+		pub_rel->relation = view;
+		pub_rel->whereClause = t->whereClause;
+		pub_rel->columns = t->columns;
+		rels = lappend(rels, pub_rel);
+		relids = lappend_oid(relids, viewid);
+
+		/* fetch all table dependencies of view & put in context */
+		ParseViewForDependencies(viewid, &context);
+	}
+
+	/* put the tables received into the rels to pass to OpenTableList */
+	foreach(lc, context.tables)
+	{
+		Relation 			table;
+		Oid 				tableoid = lfirst_oid(lc);
+		PublicationTable    *pubtab  = makeNode(PublicationTable);
+		
+		table = table_open(tableoid, ShareUpdateExclusiveLock);
+		pubtab->relation = makeRangeVar(NULL, RelationGetRelationName(table), -1);
+		/* no where or columns, presuming */
+		*tables = lappend(*tables, pubtab);
+		table_close(table, ShareUpdateExclusiveLock);
+	}
+
+	list_free(relids);
+	list_free(context.views);
+	list_free(context.tables);
 
 	return rels;
 }

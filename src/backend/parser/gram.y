@@ -10418,6 +10418,7 @@ AlterOwnerStmt: ALTER AGGREGATE aggregate_with_argtypes OWNER TO RoleSpec
  *
  *		TABLE table [, ...]
  *		ALL TABLES IN SCHEMA schema [, ...]
+ *      VIEW view [, ...]
  *
  *****************************************************************************/
 
@@ -10470,6 +10471,16 @@ PublicationObjSpec:
 					$$ = makeNode(PublicationObjSpec);
 					$$->pubobjtype = PUBLICATIONOBJ_TABLE;
 					$$->pubtable = makeNode(PublicationTable);
+					$$->pubtable->relation = $2;
+					$$->pubtable->columns = $3;
+					$$->pubtable->whereClause = $4;
+				}
+			| VIEW relation_expr opt_column_list OptWhereClause
+				{
+					$$ = makeNode(PublicationObjSpec);
+					$$->pubobjtype = PUBLICATIONOBJ_VIEW;
+					$$->pubtable = makeNode(PublicationTable);
+					/* view info stored in "pubtable" for simplicity */
 					$$->pubtable->relation = $2;
 					$$->pubtable->columns = $3;
 					$$->pubtable->whereClause = $4;
@@ -10562,6 +10573,7 @@ pub_obj_list:	PublicationObjSpec
  *
  *		TABLE table_name [, ...]
  *		ALL TABLES IN SCHEMA schema_name [, ...]
+ * 		VIEW view_name [, ...]
  *
  *****************************************************************************/
 
@@ -19527,6 +19539,25 @@ preprocess_pubobj_list(List *pubobjspec_list, core_yyscan_t yyscanner)
 				/* convert it to PublicationTable */
 				PublicationTable *pubtable = makeNode(PublicationTable);
 
+				pubtable->relation =
+					makeRangeVar(NULL, pubobj->name, pubobj->location);
+				pubobj->pubtable = pubtable;
+				pubobj->name = NULL;
+			}
+		}
+		else if (pubobj->pubobjtype == PUBLICATIONOBJ_VIEW)
+		{
+			/* relation name and pubtable (in this case a view) must be set */
+			if (!pubobj->name && !pubobj->pubtable)
+				ereport(ERROR,
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("invalid view name at or near"),
+						parser_errposition(pubobj->location));
+
+			if (pubobj->name)
+			{
+				/* convert it to PublicationTable (possibly PubView in future?) */
+				PublicationTable *pubtable = makeNode(PublicationTable);
 				pubtable->relation =
 					makeRangeVar(NULL, pubobj->name, pubobj->location);
 				pubobj->pubtable = pubtable;

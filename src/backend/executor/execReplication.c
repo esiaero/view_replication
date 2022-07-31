@@ -649,10 +649,11 @@ CheckSubscriptionRelkind(char relkind, const char *nspname,
 						 const char *relname)
 {
 	/* 
-	 * Possibly add view later if decoupled from ddl rep. At the moment only MATVIEW_DATA is decoupled. 
+	 * RELKIND_MATVIEW is added for non-DDL-based(non-portal based) replication of REFRESH.
+	 * RELKIND_VIEW is added for single view replication. 
 	 */
 	if (relkind != RELKIND_RELATION && relkind != RELKIND_PARTITIONED_TABLE && 
-		relkind != RELKIND_MATVIEW) 
+		relkind != RELKIND_MATVIEW && relkind != RELKIND_VIEW) 
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("cannot use relation \"%s.%s\" as logical replication target",

@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "access/relation.h"
+#include "access/table.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "commands/defrem.h"
@@ -587,4 +588,97 @@ StoreViewQuery(Oid viewOid, Query *viewParse, bool replace)
 	 * Now create the rules associated with the view.
 	 */
 	DefineViewRules(viewOid, viewParse, replace);
+}
+
+/* helper for viewrecurse */
+static bool
+ViewRecurse_walker(Node *node, ViewRecurse_context *context)
+{
+	if (node == NULL)
+		return false;
+
+	if (IsA(node, Query))
+	{
+		Query	   *query = (Query *) node;
+		ListCell   *rtable;
+		foreach(rtable, query->rtable)
+		{
+			RangeTblEntry *rte = lfirst(rtable);
+
+			Oid			relid = rte->relid;
+			char		relkind = rte->relkind;
+
+			/*
+			 * The OLD and NEW placeholder entries in the view's rtable are
+			 * skipped.
+			 */
+			if (relid == context->currviewoid &&
+				(strcmp(rte->eref->aliasname, "old") == 0 ||
+				 strcmp(rte->eref->aliasname, "new") == 0))
+				continue;
+
+			/* 
+			 * Currently, we only allow plain tables or views to be returned 
+			 * (since this is only used for replication)
+			 */
+			if (relkind != RELKIND_RELATION && relkind != RELKIND_PARTITIONED_TABLE &&
+				relkind != RELKIND_VIEW)
+				continue;
+
+			/* If self-referential view, stop recursing. */
+			if (list_member_oid(context->ancestor_views, relid))
+				continue;
+
+			if (relkind == RELKIND_VIEW)
+			{
+				context->currviewoid = relid;
+				ViewRecurse(context); /* relid appended in here */
+			}
+			else if (relkind == RELKIND_RELATION || relkind == RELKIND_PARTITIONED_TABLE)
+			{
+			   /* 
+				* Elect not to find all_inheritors, since the calling function 
+				* only needs to return direct table descendents for publicationcmds.c
+				* view replication. 
+				*/
+				context->tables = lappend_oid(context->tables, relid);
+			}
+			else
+			{
+				ereport(LOG,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("View recurse: only normal tables, (non-mat) views, partitioned tables are supported."),
+				 errdetail_relkind_not_supported(relkind)));
+			}
+		}
+		return query_tree_walker(query,
+								 ViewRecurse_walker,
+								 context,
+								 QTW_IGNORE_JOINALIASES);
+	}
+	return expression_tree_walker(node,
+								  ViewRecurse_walker,
+								  context);
+}
+
+/* 
+ * Get all views and (direct)tables referenced by given reloid view 
+ * adapted from lockcmds.c lockviewrecurse
+ * 
+ * Exists purely for view replication as of right now.
+ */
+void ViewRecurse(ViewRecurse_context *context)
+{
+	Relation	view;
+	Query	   *viewquery;
+
+	/* caller has already locked the view */
+	view = table_open(context->currviewoid, NoLock);
+	viewquery = get_view_query(view);
+	context->ancestor_views = lappend_oid(context->ancestor_views, context->currviewoid);
+	context->views = lappend_oid(context->views, context->currviewoid);
+
+	ViewRecurse_walker((Node *) viewquery, context);
+
+	table_close(view, NoLock);
 }

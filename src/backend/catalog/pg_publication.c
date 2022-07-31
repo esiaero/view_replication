@@ -55,9 +55,10 @@ static void publication_translate_columns(Relation targetrel, List *columns,
 static void
 check_publication_add_relation(Relation targetrel)
 {
-	/* Must be a regular or partitioned table */
+	/* Must be a regular or partitioned table OR view*/
 	if (RelationGetForm(targetrel)->relkind != RELKIND_RELATION &&
-		RelationGetForm(targetrel)->relkind != RELKIND_PARTITIONED_TABLE)
+		RelationGetForm(targetrel)->relkind != RELKIND_PARTITIONED_TABLE &&
+		RelationGetForm(targetrel)->relkind != RELKIND_VIEW)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("cannot add relation \"%s\" to publication",
