@@ -70,7 +70,7 @@ typedef struct rf_context
 
 static List *OpenRelIdList(List *relids);
 static List *OpenTableList(List *tables);
-static List *OpenAndParseViewList(List *views, List **tables);
+static List *OpenAndParseViewList(List *views, List **tables, bool add_deps);
 static void CloseTableList(List *rels);
 static void LockSchemaList(List *schemalist);
 static void PublicationAddTables(Oid pubid, List *rels, bool if_not_exists,
@@ -189,7 +189,7 @@ parse_publication_options(ParseState *pstate,
 				errorConflictingDefElem(defel, pstate);
 
 			/*
-			 * If publish option was given only the explicitly listed actions
+			 * If ddl option was given only the explicitly listed actions
 			 * should be published.
 			 */
 			pubactions->pubddl_database = false;
@@ -944,13 +944,11 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 		if (list_length(views) > 0)
 		{
 			List 		*rels;
-			rels = OpenAndParseViewList(views, &relations);
+			rels = OpenAndParseViewList(views, &relations, true);
 			/* 
 			 * Note views are not included  with the FOR ALL TABLES IN SCHEMA cmd, 
-			 * nor is there a FOR ALL VIEWS IN SCHEMA (for now at least).
-			 * 
-			 * CheckObjSchemaNotAlreadyInPublication(rels, schemaidlist, PUBLICATIONOBJ_VIEW);
-			 */ 
+			 * nor is there a FOR ALL VIEWS IN SCHEMA.
+			 */
 			TransformPubWhereClauses(rels, pstate->p_sourcetext,
 									 publish_via_partition_root);
 			CheckPubRelationColumnList(rels, pstate->p_sourcetext,
@@ -1230,6 +1228,200 @@ InvalidatePublicationRels(List *relids)
 }
 
 /*
+ * Add or remove views to/from publication.
+ */
+static void
+AlterPublicationViews(AlterPublicationStmt *stmt, HeapTuple tup,
+					  List *views, const char *queryString)
+{
+	List	   *rels = NIL;
+	Form_pg_publication pubform = (Form_pg_publication) GETSTRUCT(tup);
+	Oid			pubid = pubform->oid;
+
+	/*
+	 * Nothing to do if no objects, except in SET: for that it is quite
+	 * possible that user has not specified any views in which case we need
+	 * to remove all the existing views.
+	 */
+	if (!views && stmt->action != AP_SetObjects)
+	{
+		return;
+	}
+	
+	if (stmt->action == AP_AddObjects)
+	{
+		List	   *tableRels = NIL;
+		List	   *tableDependencies = NIL;
+		rels = OpenAndParseViewList(views, &tableDependencies, true);
+		TransformPubWhereClauses(rels, queryString, pubform->pubviaroot);
+		CheckPubRelationColumnList(rels, queryString, pubform->pubviaroot);
+		/* specify if_not_exist since we add possible contingent views */
+		PublicationAddTables(pubid, rels, true, stmt);
+
+		/* Add any needed dependent tables, specifying if_not_exist. */
+		tableRels = OpenTableList(tableDependencies);
+		TransformPubWhereClauses(tableRels, queryString, pubform->pubviaroot);
+		CheckPubRelationColumnList(tableRels, queryString, pubform->pubviaroot);
+		PublicationAddTables(pubid, tableRels, true, stmt);
+
+		list_free(tableDependencies);
+		CloseTableList(tableRels);
+	}
+	else if (stmt->action == AP_DropObjects)
+	{
+		/* Don't parse any dependent tables; we don't drop them. */
+		rels = OpenAndParseViewList(views, NULL, false);
+		PublicationDropTables(pubid, rels, false);
+	}
+	else	/* AP_SetObjects */
+	{
+		List	   *oldrelids = GetPublicationRelations(pubid,
+														PUBLICATION_PART_ROOT);
+		List	   *delrels = NIL;
+		ListCell   *oldlc;
+
+		List	   *tableRels = NIL;
+		List	   *tableDependencies = NIL;
+
+		rels = OpenAndParseViewList(views, &tableDependencies, true);
+		TransformPubWhereClauses(rels, queryString, pubform->pubviaroot);
+		CheckPubRelationColumnList(rels, queryString, pubform->pubviaroot);
+
+		/* 
+		 * Add any dependent tables, specifying if_not_exist.
+		 * Due to check in AlterPublication SET for view is mutually
+		 * exclusive with SET for tables, so AlterPubTables won't remove 
+		 * any tables added here.
+		 */
+		tableRels = OpenTableList(tableDependencies);
+		TransformPubWhereClauses(tableRels, queryString, pubform->pubviaroot);
+		CheckPubRelationColumnList(tableRels, queryString, pubform->pubviaroot);
+		PublicationAddTables(pubid, tableRels, true, stmt);
+
+		list_free(tableDependencies);
+		CloseTableList(tableRels);
+
+		/* 
+		 * Basically same as AlterPublicationTable - 
+		 * check for views that do not need to be dropped
+		 */
+		foreach(oldlc, oldrelids)
+		{
+			Oid			oldrelid = lfirst_oid(oldlc);
+			ListCell   *newlc;
+			PublicationRelInfo *oldrel;
+			bool		found = false;
+			HeapTuple	rftuple;
+			Node	   *oldrelwhereclause = NULL;
+			Bitmapset  *oldcolumns = NULL;
+
+			/* We only want to look at views */
+			Relation    rel = table_open(oldrelid, ShareUpdateExclusiveLock);
+			if (RelationGetForm(rel)->relkind != RELKIND_VIEW)
+			{
+				table_close(rel, ShareUpdateExclusiveLock);
+				continue;
+			}
+			table_close(rel, ShareUpdateExclusiveLock);
+
+			/* look up the cache for the old relmap */
+			rftuple = SearchSysCache2(PUBLICATIONRELMAP,
+									  ObjectIdGetDatum(oldrelid),
+									  ObjectIdGetDatum(pubid));
+
+			if (HeapTupleIsValid(rftuple))
+			{
+				bool		isnull = true;
+				Datum		whereClauseDatum;
+				Datum		columnListDatum;
+
+				whereClauseDatum = SysCacheGetAttr(PUBLICATIONRELMAP, rftuple,
+												   Anum_pg_publication_rel_prqual,
+												   &isnull);
+				if (!isnull)
+					oldrelwhereclause = stringToNode(TextDatumGetCString(whereClauseDatum));
+
+				/* Transform the int2vector column list to a bitmap. */
+				columnListDatum = SysCacheGetAttr(PUBLICATIONRELMAP, rftuple,
+												  Anum_pg_publication_rel_prattrs,
+												  &isnull);
+
+				if (!isnull)
+					oldcolumns = pub_collist_to_bitmapset(NULL, columnListDatum, NULL);
+
+				ReleaseSysCache(rftuple);
+			}
+
+			foreach(newlc, rels)
+			{
+				PublicationRelInfo *newpubrel;
+				Oid					newrelid;
+				Bitmapset  		   *newcolumns = NULL;
+
+				newpubrel = (PublicationRelInfo *) lfirst(newlc);
+				newrelid = RelationGetRelid(newpubrel->relation);
+
+				/* If the new publication has column list, transform it to a bitmap too. */
+				if (newpubrel->columns)
+				{
+					ListCell   *lc;
+
+					foreach(lc, newpubrel->columns)
+					{
+						char	   *colname = strVal(lfirst(lc));
+						AttrNumber	attnum = get_attnum(newrelid, colname);
+
+						newcolumns = bms_add_member(newcolumns, attnum);
+					}
+				}
+
+				/*
+				 * Check if any of the new set of relations matches with the
+				 * existing relations in the publication. (also check 
+				 * WHERE and columns))
+				 */
+				if (RelationGetRelid(newpubrel->relation) == oldrelid)
+				{
+					if (equal(oldrelwhereclause, newpubrel->whereClause) &&
+						bms_equal(oldcolumns, newcolumns))
+					{
+						found = true;
+						break;
+					}
+				}
+			}
+
+			/*
+			 * Add the non-matched relations to a list so that they can be
+			 * dropped.
+			 */
+			if (!found)
+			{
+				oldrel = palloc(sizeof(PublicationRelInfo));
+				oldrel->whereClause = NULL;
+				oldrel->columns = NIL;
+				oldrel->relation = table_open(oldrelid,
+											  ShareUpdateExclusiveLock);
+				delrels = lappend(delrels, oldrel);
+			}
+		}
+
+		/* And drop them. */
+		PublicationDropTables(pubid, delrels, true);
+
+		/*
+		 * Don't bother calculating the difference for adding, we'll catch and
+		 * skip existing ones when doing catalog update.
+		 */
+		PublicationAddTables(pubid, rels, true, stmt);
+
+		CloseTableList(delrels);
+	}
+
+	CloseTableList(rels);
+}
+
+/*
  * Add or remove table to/from publication.
  */
 static void
@@ -1298,6 +1490,15 @@ AlterPublicationTables(AlterPublicationStmt *stmt, HeapTuple tup,
 			HeapTuple	rftuple;
 			Node	   *oldrelwhereclause = NULL;
 			Bitmapset  *oldcolumns = NULL;
+
+			/* Ignore views (SET TABLE shouldn't change views) */
+			Relation    rel = table_open(oldrelid, ShareUpdateExclusiveLock);
+			if (RelationGetForm(rel)->relkind == RELKIND_VIEW)
+			{
+				table_close(rel, ShareUpdateExclusiveLock);
+				continue;
+			}
+			table_close(rel, ShareUpdateExclusiveLock);
 
 			/* look up the cache for the old relmap */
 			rftuple = SearchSysCache2(PUBLICATIONRELMAP,
@@ -1477,7 +1678,7 @@ AlterPublicationSchemas(AlterPublicationStmt *stmt,
  */
 static void
 CheckAlterPublication(AlterPublicationStmt *stmt, HeapTuple tup,
-					  List *tables, List *schemaidlist)
+					  List *tables, List *views, List *schemaidlist)
 {
 	Form_pg_publication pubform = (Form_pg_publication) GETSTRUCT(tup);
 
@@ -1505,6 +1706,13 @@ CheckAlterPublication(AlterPublicationStmt *stmt, HeapTuple tup,
 				 errmsg("publication \"%s\" is defined as FOR ALL TABLES",
 						NameStr(pubform->pubname)),
 				 errdetail("Tables cannot be added to or dropped from FOR ALL TABLES publications.")));
+
+	if (views && pubform->puballtables)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("publication \"%s\" is defined as FOR ALL TABLES",
+						NameStr(pubform->pubname)),
+				 errdetail("Views cannot be added to or dropped from FOR ALL TABLES publications.")));
 }
 
 /*
@@ -1550,7 +1758,15 @@ AlterPublication(ParseState *pstate, AlterPublicationStmt *stmt)
 		ObjectsInPublicationToOids(stmt->pubobjects, pstate, &relations,
 								   &schemaidlist, &views);
 
-		CheckAlterPublication(stmt, tup, relations, schemaidlist);
+		/* 
+		 * Even though the main check in CheckAlterPublication is related
+		 * to for_all_tables,
+		 * FOR ALL TABLES under DDL replication can allow a view to be
+		 * replicated, so we prevent dropping those views by passing "views".
+		 * 
+		 * This is subject to change as DDL replication evolves
+		 */
+		CheckAlterPublication(stmt, tup, relations, views, schemaidlist);
 
 		heap_freetuple(tup);
 
@@ -1578,9 +1794,43 @@ AlterPublication(ParseState *pstate, AlterPublicationStmt *stmt)
 					errmsg("publication \"%s\" does not exist",
 						   stmt->pubname));
 
-		AlterPublicationTables(stmt, tup, relations, schemaidlist,
-							   pstate->p_sourcetext);
-		AlterPublicationSchemas(stmt, tup, schemaidlist);
+		
+		/* 
+		 * Special case is needed for SET, since we disallow set both of tables and views
+		 * due to ambiguous meaning:
+		 * SET TABLE t1, VIEW v1 - 
+		 * Should SET TABLE remove all tables that SET VIEW v1 added and publish only t1?
+		 * Or should they add both? Should the meaning be different for SET VIEW v1, TABLE t1?
+		 * 
+		 * Above may warrant more in-depth discussion.
+		 */
+		if (stmt->action == AP_SetObjects)
+		{
+			if ((relations || schemaidlist) && views)
+				ereport(ERROR,
+						errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("set view and set table/tables in schema both specified, which is ambiguous"));
+			else if ((relations || schemaidlist) && !views)
+			{
+				AlterPublicationTables(stmt, tup, relations, schemaidlist,
+								pstate->p_sourcetext);
+				AlterPublicationSchemas(stmt, tup, schemaidlist);
+			}
+			else if (views) /* at this point we know !relations && !schemaidlist */
+				AlterPublicationViews(stmt, tup, views, pstate->p_sourcetext);
+		}
+		else
+		{
+			/* 
+			* unlike with creating views, elect to parse added table dependencies 
+			* within alter pub views rather than passing
+			* to alter pub tables to specify if_not_exist when adding tables
+			*/
+			AlterPublicationViews(stmt, tup, views, pstate->p_sourcetext);
+			AlterPublicationTables(stmt, tup, relations, schemaidlist,
+								pstate->p_sourcetext);
+			AlterPublicationSchemas(stmt, tup, schemaidlist);
+		}
 	}
 
 	/* Cleanup. */
@@ -1895,21 +2145,22 @@ static void ParseViewForDependencies(Oid viewoid, ViewRecurse_context *context)
 }
 
 static List *
-OpenAndParseViewList(List *views, List **tables)
+OpenAndParseViewList(List *views, List **tables, bool add_deps)
 {
 	List	   			*relids = NIL;
 	List	   			*rels = NIL;
 	ListCell   			*lc;
 	ViewRecurse_context context;
+	PublicationTable   *t;
 	context.views = NIL;
 	context.tables = NIL;
 
 	foreach(lc, views)
 	{
-		PublicationTable   *t = lfirst_node(PublicationTable, lc);
 		Relation			view;
 		Oid					viewid;
 		PublicationRelInfo *pub_rel;
+		t = lfirst_node(PublicationTable, lc);
 
 		/* Allow query cancel in case this takes a long time */
 		CHECK_FOR_INTERRUPTS();
@@ -1931,22 +2182,51 @@ OpenAndParseViewList(List *views, List **tables)
 		rels = lappend(rels, pub_rel);
 		relids = lappend_oid(relids, viewid);
 
-		/* fetch all table dependencies of view & put in context */
-		ParseViewForDependencies(viewid, &context);
+		if (add_deps)
+		{
+			/* fetch all table dependencies of view & put in context */
+			ParseViewForDependencies(viewid, &context);
+		}
 	}
 
-	/* put the tables received into the rels to pass to OpenTableList */
-	foreach(lc, context.tables)
+	if (add_deps)
 	{
-		Relation 			table;
-		Oid 				tableoid = lfirst_oid(lc);
-		PublicationTable    *pubtab  = makeNode(PublicationTable);
-		
-		table = table_open(tableoid, ShareUpdateExclusiveLock);
-		pubtab->relation = makeRangeVar(NULL, RelationGetRelationName(table), -1);
-		/* no where or columns, presuming */
-		*tables = lappend(*tables, pubtab);
-		table_close(table, ShareUpdateExclusiveLock);
+		/* put the tables received into the rels to pass to OpenTableList */
+		foreach(lc, context.tables)
+		{
+			Relation 			table;
+			Oid 				tableoid = lfirst_oid(lc);
+			PublicationTable    *pubtab  = makeNode(PublicationTable);
+			
+			table = table_open(tableoid, ShareUpdateExclusiveLock);
+			pubtab->relation = makeRangeVar(NULL, RelationGetRelationName(table), -1);
+			/* no where or columns, presuming */
+			*tables = lappend(*tables, pubtab);
+			table_close(table, ShareUpdateExclusiveLock);
+		}
+
+		/* put needed views into current rel list */
+		foreach(lc, context.views)
+		{
+			PublicationRelInfo *pub_rel;
+			Oid 				viewoid = lfirst_oid(lc);
+			Relation			view = table_open(viewoid, ShareUpdateExclusiveLock);
+
+			/* Filter out duplicates (O(N^2)) */
+			if (list_member_oid(relids, viewoid))
+			{
+				table_close(view, ShareUpdateExclusiveLock);
+				continue;
+			}
+
+			pub_rel = palloc(sizeof(PublicationRelInfo));
+			pub_rel->relation = view;
+			/* t from before */
+			pub_rel->whereClause = t->whereClause;
+			pub_rel->columns = t->columns;
+			rels = lappend(rels, pub_rel);
+			relids = lappend_oid(relids, viewoid);
+		}
 	}
 
 	list_free(relids);
