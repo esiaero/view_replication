@@ -20,7 +20,6 @@ $node_subscriber->start;
 
 my $init = qq(
 	CREATE TABLE tab1 (a int, b int);
-	CREATE VIEW init_view AS SELECT * FROM tab1;
 );
 $node_publisher->safe_psql('postgres', $init);
 $node_subscriber->safe_psql('postgres', $init);
@@ -30,98 +29,79 @@ $node_publisher->safe_psql('postgres', "CREATE PUBLICATION mypub FOR ALL TABLES;
 
 my $list_pubs = qq(SELECT * FROM pg_publication_tables);
 my $pub_result = $node_publisher->safe_psql('postgres', $list_pubs);
-is($pub_result, qq(mypub|public|tab1|{a,b}|
-mypub|public|init_view|{a,b}|), 'View publication created');
+is($pub_result, qq(mypub|public|tab1|{a,b}|), 'View publication created');
 
 $node_subscriber->safe_psql('postgres',
 	"CREATE SUBSCRIPTION mysub CONNECTION '$publisher_connstr' PUBLICATION mypub;"
 );
 
-#--Test CREATE DDL, should work on ddl_replication branch but not master
-my $create_view = qq(CREATE VIEW vista AS SELECT * FROM tab1;);
-$node_publisher->safe_psql('postgres', $create_view);
+#--Test CREATE DDL
+# note insert into view can fail depending on rule/triggers. should have separate
+# test case for that.
+$node_publisher->safe_psql('postgres', qq(
+	CREATE VIEW vista AS SELECT * FROM tab1;
+	INSERT INTO vista VALUES (1, 2);
+));
+my $check_view_rows = qq(SELECT * from vista;);
+$pub_result = $node_publisher->safe_psql('postgres', $list_pubs);
+is($pub_result, qq(mypub|public|tab1|{a,b}|
+mypub|public|vista|{a,b}|), 'View publication created');
 
 $node_publisher->wait_for_catchup('mysub');
 
-my $check_view_rows = qq(SELECT * from vista;);
 $pub_result = $node_publisher->safe_psql('postgres', $check_view_rows);
 my $sub_result = $node_subscriber->safe_psql('postgres', $check_view_rows);
+is($pub_result, qq(1|2), 'Sanity check');
 is($sub_result, qq($pub_result), 'CREATE vista replicated successfully');
 
-#--INSERT INTO view DML test. This can fail for complicated by rules/triggers
-my $insert_view = qq(INSERT INTO vista VALUES (8, 9););
-$node_publisher->safe_psql('postgres', $insert_view);
-
-$node_publisher->wait_for_catchup('mysub');
-
-$pub_result = $node_publisher->safe_psql('postgres', $check_view_rows);
-$sub_result = $node_subscriber->safe_psql('postgres', $check_view_rows);
-is($sub_result, qq($pub_result), 'INSERT INTO view replicated successfully');
-
-
-
-
-
-#--Test ALTER VIEW RENAME column DDL, should not work
-my $alter_view = qq(ALTER VIEW vista RENAME b TO b2;);
-$node_publisher->safe_psql('postgres', $alter_view);
+#--Test ALTER VIEW RENAME column DDL
+$node_publisher->safe_psql('postgres', qq(ALTER VIEW vista RENAME b TO b2;));
 
 $node_publisher->wait_for_catchup('mysub');
 
 my $check_view_columns = qq(\\d vista);
 $pub_result = $node_publisher->safe_psql('postgres', $check_view_columns);
 $sub_result = $node_subscriber->safe_psql('postgres', $check_view_columns);
-# is(0, qq(1), "there are $sub_result");
-# is(0, qq(1), "there are $pub_result");
+is($pub_result, qq(a|integer|||\nb2|integer|||), 'Sanity check');
 is($sub_result, qq($pub_result), 'ALTER view RENAME column replicated successfully');
 
-
-# #--Test ALTER TABLE RENAME column DDL, should not work
-my $alter_table = qq(ALTER TABLE tab1 RENAME b TO b2;);
-$node_publisher->safe_psql('postgres', $alter_table);
+#--Test ALTER VIEW RENAME view DDL
+$node_publisher->safe_psql('postgres', qq(ALTER VIEW vista RENAME TO vista2;));
 
 $node_publisher->wait_for_catchup('mysub');
 
-my $check_table_columns = qq(\\d tab1);
-$pub_result = $node_publisher->safe_psql('postgres', $check_table_columns);
-$sub_result = $node_subscriber->safe_psql('postgres', $check_table_columns);
-is($sub_result, qq($pub_result), 'ALTER table RENAME column replicated successfully');
+my $list_nonsystem_views = qq(SELECT table_name FROM INFORMATION_SCHEMA.views WHERE table_schema = ANY (current_schemas(false)););
+$pub_result = $node_publisher->safe_psql('postgres', $list_nonsystem_views);
+$sub_result = $node_subscriber->safe_psql('postgres', $list_nonsystem_views);
+is($pub_result, qq(vista2), 'Sanity check');
+is($sub_result, qq($pub_result), 'ALTER view RENAME TO replicated successfully');
 
-
-
-
-
-#--Test ALTER TABLE RENAME table DDL, should  work
-my $rename_table = qq(ALTER TABLE tab1 RENAME TO tab2;);
-$node_publisher->safe_psql('postgres', $rename_table);
+#--Test DROP VIEW DDL
+$node_publisher->safe_psql('postgres', qq(DROP VIEW vista2;));
 
 $node_publisher->wait_for_catchup('mysub');
 
-my $list_tables = qq(\\dt);
-$pub_result = $node_publisher->safe_psql('postgres', $list_tables);
-$sub_result = $node_subscriber->safe_psql('postgres', $list_tables);
-is($sub_result, qq($pub_result), 'ALTER table RENAME tab1 replicated successfully');
+$pub_result = $node_publisher->safe_psql('postgres', $list_nonsystem_views);
+$sub_result = $node_subscriber->safe_psql('postgres', $list_nonsystem_views);
+is($pub_result, qq(), 'Sanity check');
+is($sub_result, qq(), 'DROP view replicated successfully');
 
-#--Test ALTER VIEW RENAME view DDL, should work on ddl_replication
-my $rename_view = qq(ALTER VIEW vista RENAME TO vista2;);
-$node_publisher->safe_psql('postgres', $rename_view);
+#--Test DROP VIEW CASCADE DDL
+$node_publisher->safe_psql('postgres', qq(
+	CREATE VIEW vista AS SELECT * FROM tab1;
+	CREATE VIEW dep AS SELECT * FROM vista UNION ALL SELECT * FROM tab1;
+));
+$pub_result = $node_publisher->safe_psql('postgres', $list_nonsystem_views);
+is($pub_result, qq(vista\ndep), 'Sanity check');
 
-$node_publisher->wait_for_catchup('mysub');
-
-my $list_views = qq(\\dv);
-$pub_result = $node_publisher->safe_psql('postgres', $list_views);
-$sub_result = $node_subscriber->safe_psql('postgres', $list_views);
-is($sub_result, qq($pub_result), 'ALTER VIEW RENAME vista replicated successfully');
-
-#--Test DROP VIEW DDL, should work on ddl_replication
-my $drop_vista = qq(DROP VIEW vista2;);
-$node_publisher->safe_psql('postgres', $drop_vista);
+$node_publisher->safe_psql('postgres', qq(DROP VIEW vista CASCADE;));
 
 $node_publisher->wait_for_catchup('mysub');
 
-$pub_result = $node_publisher->safe_psql('postgres', $list_views);
-$sub_result = $node_subscriber->safe_psql('postgres', $list_views);
-is($sub_result, qq($pub_result), 'DROP VIEW vista replicated successfully');
+$pub_result = $node_publisher->safe_psql('postgres', $list_nonsystem_views);
+$sub_result = $node_subscriber->safe_psql('postgres', $list_nonsystem_views);
+is($pub_result, qq(), 'Sanity check');
+is($sub_result, qq(), 'DROP view CASCADE replicated correctly');
 
 pass "basic view replication DDL tests (for all tables) passed";
 
