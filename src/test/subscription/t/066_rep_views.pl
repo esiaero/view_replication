@@ -18,29 +18,24 @@ $node_subscriber->init(allows_streaming => 'logical');
 $node_subscriber->append_conf('postgresql.conf', 'autovacuum = off');
 $node_subscriber->start;
 
-my $create_table = qq(CREATE TABLE tab1 (a int, b int););
-$node_publisher->safe_psql('postgres', $create_table);
-$node_subscriber->safe_psql('postgres', $create_table);
+my $init = qq(
+	CREATE TABLE tab1 (a int, b int);
+	CREATE VIEW init_view AS SELECT * FROM tab1;
+);
+$node_publisher->safe_psql('postgres', $init);
+$node_subscriber->safe_psql('postgres', $init);
 
 my $publisher_connstr = $node_publisher->connstr . ' dbname=postgres';
 $node_publisher->safe_psql('postgres', "CREATE PUBLICATION mypub FOR ALL TABLES;");
+
+my $list_pubs = qq(SELECT * FROM pg_publication_tables);
+my $pub_result = $node_publisher->safe_psql('postgres', $list_pubs);
+is($pub_result, qq(mypub|public|tab1|{a,b}|
+mypub|public|init_view|{a,b}|), 'View publication created');
+
 $node_subscriber->safe_psql('postgres',
 	"CREATE SUBSCRIPTION mysub CONNECTION '$publisher_connstr' PUBLICATION mypub;"
 );
-
-#--Test INSERT DML, should always succeed
-$node_publisher->safe_psql(
-	'postgres', qq(
-		INSERT INTO tab1 VALUES (1, 2);
-		INSERT INTO tab1 VALUES (3, 4);
-));
-
-$node_publisher->wait_for_catchup('mysub');
-
-my $select_table = qq(SELECT * from tab1);
-my $pub_result = $node_publisher->safe_psql('postgres', $select_table);
-my $sub_result = $node_subscriber->safe_psql('postgres', $select_table);
-is($sub_result, qq($pub_result), 'Tab1 correctly replicates insert DML command');
 
 #--Test CREATE DDL, should work on ddl_replication branch but not master
 my $create_view = qq(CREATE VIEW vista AS SELECT * FROM tab1;);
@@ -50,7 +45,7 @@ $node_publisher->wait_for_catchup('mysub');
 
 my $check_view_rows = qq(SELECT * from vista;);
 $pub_result = $node_publisher->safe_psql('postgres', $check_view_rows);
-$sub_result = $node_subscriber->safe_psql('postgres', $check_view_rows);
+my $sub_result = $node_subscriber->safe_psql('postgres', $check_view_rows);
 is($sub_result, qq($pub_result), 'CREATE vista replicated successfully');
 
 #--INSERT INTO view DML test. This can fail for complicated by rules/triggers

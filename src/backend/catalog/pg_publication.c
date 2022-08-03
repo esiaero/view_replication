@@ -134,8 +134,13 @@ check_publication_add_schema(Oid schemaid)
 static bool
 is_publishable_class(Oid relid, Form_pg_class reltuple)
 {
+	/* 
+	 * Note the inclusion of relkind_view - see 
+	 * GetAllTablesPubRelations for explanation
+	 */
 	return (reltuple->relkind == RELKIND_RELATION ||
-			reltuple->relkind == RELKIND_PARTITIONED_TABLE) &&
+			reltuple->relkind == RELKIND_PARTITIONED_TABLE ||
+			reltuple->relkind == RELKIND_VIEW) &&
 		!IsCatalogRelationOid(relid) &&
 		reltuple->relpersistence == RELPERSISTENCE_PERMANENT &&
 		relid >= FirstNormalObjectId;
@@ -808,6 +813,34 @@ GetAllTablesPublicationRelations(bool pubviaroot)
 	}
 
 	table_endscan(scan);
+
+	/* * * * * * * * * * * * * 
+	 * scan for views during FOR ALL TABLE - this may or may not be 
+	 * desired behavior depending on how DDL replication evolves, so
+	 * ths is subject to change
+	 * e.g., syntax for replicating all views may no longer be FOR ALL TABLES
+	 */
+	ScanKeyInit(&key[0],
+				Anum_pg_class_relkind,
+				BTEqualStrategyNumber, F_CHAREQ,
+				CharGetDatum(RELKIND_VIEW));
+
+	scan = table_beginscan_catalog(classRel, 1, key);
+
+	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	{
+		Form_pg_class relForm = (Form_pg_class) GETSTRUCT(tuple);
+		Oid			relid = relForm->oid;
+
+		if (is_publishable_class(relid, relForm) &&
+			!(relForm->relispartition && pubviaroot))
+			result = lappend_oid(result, relid);
+	}
+
+	table_endscan(scan);
+	/* 
+	 * end scan for views
+	 * * * * * * * * * * * * * */
 
 	if (pubviaroot)
 	{
