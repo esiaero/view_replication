@@ -1037,6 +1037,12 @@ copy_table(Relation rel)
 	fetch_remote_table_info(get_namespace_name(RelationGetNamespace(rel)),
 							RelationGetRelationName(rel), &lrel, &qual);
 
+	/* Nothing to "copy" for view. Return suppresses CopyFrom error */
+	if (lrel.relkind == RELKIND_VIEW)
+	{
+		return;
+	}
+
 	/* Put the relation into relmap. */
 	logicalrep_relmap_update(&lrel);
 
