@@ -1453,7 +1453,7 @@ RemoveRelations(ParseState *pstate, DropStmt *drop, bool isCompleteQuery)
 		{
 			Oid tableOid = InvalidOid;
 
-			if (relkind == RELKIND_RELATION)
+			if (relkind == RELKIND_RELATION || relkind == RELKIND_VIEW)
 				tableOid = relOid;
 			else if (relkind == RELKIND_INDEX)
 				tableOid = IndexGetRelation(relOid, true);

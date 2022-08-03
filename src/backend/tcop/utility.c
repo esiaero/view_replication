@@ -1220,15 +1220,16 @@ LogLogicalDDLCommand(Node *parsetree, const char *queryString)
 			DropStmt *stmt = (DropStmt *) parsetree;
 			switch (stmt->removeType)
 			{
-				/* Maybe allowed in Table level DDL replication, handled in later code path */
+				/* Allowed in Table level DDL replication, handled in (RemoveRelations) */
 				case OBJECT_INDEX:
 				case OBJECT_TABLE:
+				case OBJECT_VIEW:
 					break;
 				/* Drop of sequence is by logical replication of sequences separately */
 				case OBJECT_SEQUENCE:
 					break;
+				
 				/* Drop of other objects are allowed in Database level DDL replication only */
-				case OBJECT_VIEW:
 				case OBJECT_MATVIEW:
 				case OBJECT_FOREIGN_TABLE:
 				default:
