@@ -1428,7 +1428,7 @@ pgoutput_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	 * message.
 	 */
 	if (table_rewrite &&
-		(!relentry->pubactions.pubddl_database || !relentry->pubactions.pubddl_table))
+		(!relentry->pubactions.pubddl_database || !relentry->pubactions.pubddl_table || !relentry->pubactions.pubddl_view))
 		return;
 
 	/* Avoid leaking memory by using and resetting our own context */
@@ -1773,7 +1773,7 @@ pgoutput_ddlmessage(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	{
 		Publication *pub = (Publication *) lfirst(lc);
 		/* TODO need to check relid for table level DDLs */
-		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
+		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table && !pub->pubactions.pubddl_view)
 			return;
 	}
 
@@ -1837,7 +1837,7 @@ pgoutput_refreshmessage(LogicalDecodingContext *ctx,
 	{
 		Publication *pub = (Publication *) lfirst(lc);
 		/* TODO need to check relid for table level DDLs */
-		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table)
+		if (!pub->pubactions.pubddl_database && !pub->pubactions.pubddl_table && !pub->pubactions.pubddl_view)
 			return;
 	}
 
@@ -2185,6 +2185,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 			entry->pubactions.pubdelete = entry->pubactions.pubtruncate =
 			entry->pubactions.pubddl_database =
 			entry->pubactions.pubddl_table = 
+			entry->pubactions.pubddl_view = 
 			entry->pubactions.pubrefresh = false;
 		entry->new_slot = NULL;
 		entry->old_slot = NULL;
@@ -2245,6 +2246,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 		entry->pubactions.pubtruncate = false;
 		entry->pubactions.pubddl_database = false;
 		entry->pubactions.pubddl_table = false;
+		entry->pubactions.pubddl_view = false;
 		entry->pubactions.pubrefresh = false;
 
 		/*
@@ -2361,6 +2363,7 @@ get_rel_sync_entry(PGOutputData *data, Relation relation)
 				entry->pubactions.pubtruncate |= pub->pubactions.pubtruncate;
 				entry->pubactions.pubddl_database |= pub->pubactions.pubddl_database;
 				entry->pubactions.pubddl_table |= pub->pubactions.pubddl_table;
+				entry->pubactions.pubddl_view |= pub->pubactions.pubddl_view;
 				entry->pubactions.pubrefresh |= pub->pubactions.pubrefresh;
 
 				/*
