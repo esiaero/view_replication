@@ -1540,12 +1540,28 @@ ProcessUtilitySlow(ParseState *pstate,
 						EventTriggerAlterTableStart(parsetree);
 						EventTriggerAlterTableRelid(relid);
 
+						/* 
+						 * Add separate view check here. Consolidation of commands is not done
+						 * because DDL is a WIP and it is likely easier to just not touch
+						 * DDL-specific things for now
+						 */
+						if (atstmt->objtype == OBJECT_VIEW)
+						{
+							if (action_need_xlog(relid, CHECK_PUBACTION_PUBDDL_VIEW))
+							{
+								const char* prefix = "";
+								LogLogicalDDLMessage(prefix,
+													GetUserId(),
+													queryString,
+													strlen(queryString));
+							}
+						}
 						/*
 						 * Log the ALTER TABLE command if
 						 * There is any publication with database level ddl on or
 						 * this TABLE belongs to any publication with table level ddl on
 						 */
-						if (XLogLogicalInfoActive() &&
+						else if (XLogLogicalInfoActive() &&
 							isCompleteQuery &&
 							ddl_need_xlog(relid, false))
 						{
@@ -1774,13 +1790,30 @@ ProcessUtilitySlow(ParseState *pstate,
 
 					/* ... and do it */
 					EventTriggerAlterTableStart(parsetree);
+					
 
+					/* 
+					 * Add separate view check here. Consolidation of commands is not done
+					 * because DDL is a WIP and it is likely easier to just not touch
+					 * DDL-specific things for now
+					 */
+					if (get_rel_relkind(relid) == RELKIND_VIEW)
+					{
+						if (action_need_xlog(relid, CHECK_PUBACTION_PUBDDL_VIEW))
+						{
+							const char* prefix = "";
+							LogLogicalDDLMessage(prefix,
+												GetUserId(),
+												queryString,
+												strlen(queryString));
+						}
+					}
 					/*
 					 * Log CREATE INDEX cmd for logical replication if
 					 * there is any publication with database level ddl on or
 					 * this TABLE belongs to any publication with table level ddl on.
 					 */
-					if (XLogLogicalInfoActive() &&
+					else if (XLogLogicalInfoActive() &&
 						isCompleteQuery &&
 						ddl_need_xlog(relid, false))
 					{

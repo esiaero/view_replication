@@ -196,6 +196,7 @@ parse_publication_options(ParseState *pstate,
 			 */
 			pubactions->pubddl_database = false;
 			pubactions->pubddl_table = false;
+			pubactions->pubddl_view = false;
 
 			*ddl_level_given = true;
 			ddl_level = defGetString(defel);
@@ -220,10 +221,13 @@ parse_publication_options(ParseState *pstate,
 					{
 						pubactions->pubddl_database = true;
 						pubactions->pubddl_table = true;
+						pubactions->pubddl_view = true;
 					}
 				}
 				else if (strcmp(publish_opt, "table") == 0)
 					pubactions->pubddl_table = true;
+				else if (strcmp(publish_opt, "view") == 0)
+					pubactions->pubddl_view = true;
 				else
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),

@@ -175,6 +175,10 @@ extern Bitmapset *pub_collist_to_bitmapset(Bitmapset *columns, Datum pubcols,
 extern Oid	get_publication_oid(const char *pubname, bool missing_ok);
 extern char *get_publication_name(Oid pubid, bool missing_ok);
 extern bool ddl_need_xlog(Oid relid, bool forAllTabPubOnly);
-extern bool refresh_need_xlog(Oid relid, bool forAllTabPubOnly);
+
+/* put definitions down here since the whole function is TODO/TOCHANGE */
+#define CHECK_PUBACTION_PUBREFRESH			(1<<0)
+#define CHECK_PUBACTION_PUBDDL_VIEW			(1<<1)
+extern bool action_need_xlog(Oid relid, int action_to_check);
 
 #endif							/* PG_PUBLICATION_H */

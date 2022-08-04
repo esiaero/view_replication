@@ -1294,20 +1294,17 @@ ddl_need_xlog(Oid relid, bool forAllTabPubOnly)
 
 
 /*
- * Analogous command to above to see if refresh should be logged.
- * Separated in anticipation of possible changes with single view replication,
- * which may differ from the above ddl_need_xlog command (pending investigation).
+ * Analogous command to above to see if actions should be logged.
+ * Separated in anticipation of possible changes with single (materialized) view replication,
+ * which may differ from the above command (pending investigation).
  * Otherwise(TODO) will eventually be merged with above.
  */
 bool
-refresh_need_xlog(Oid relid, bool forAllTabPubOnly)
+action_need_xlog(Oid relid, int action_to_check)
 {
 	List *allTablePubs = NIL;
 	List *tablePubs = NIL;
 	ListCell *lc;
-
-	if (relid == InvalidOid && !forAllTabPubOnly)
-		return false;
 
 	allTablePubs = GetAllTablesPublications();
 	foreach(lc, allTablePubs)
@@ -1315,11 +1312,14 @@ refresh_need_xlog(Oid relid, bool forAllTabPubOnly)
 		Oid pubid = lfirst_oid(lc);
 		Publication *pub = GetPublication(pubid);
 
-		if (pub->pubactions.pubddl_database && pub->pubactions.pubrefresh)
-			return true;
+		if (action_to_check & CHECK_PUBACTION_PUBREFRESH)
+			return pub->pubactions.pubrefresh;
+		
+		if (action_to_check & CHECK_PUBACTION_PUBDDL_VIEW)
+			return pub->pubactions.pubddl_view;
 	}
-	
-	if (forAllTabPubOnly)
+
+	if (relid == InvalidOid)
 		return false;
 
 	tablePubs = GetRelationPublications(relid);
@@ -1328,8 +1328,11 @@ refresh_need_xlog(Oid relid, bool forAllTabPubOnly)
 		Oid pubid = lfirst_oid(lc);
 		Publication *pub = GetPublication(pubid);
 
-		if (pub->pubactions.pubddl_table && pub->pubactions.pubrefresh)
-			return true;
+		if (action_to_check & CHECK_PUBACTION_PUBREFRESH)
+			return pub->pubactions.pubrefresh;
+
+		if (action_to_check & CHECK_PUBACTION_PUBDDL_VIEW)
+			return pub->pubactions.pubddl_view;
 	}
 
 	return false;

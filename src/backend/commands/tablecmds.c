@@ -1453,7 +1453,7 @@ RemoveRelations(ParseState *pstate, DropStmt *drop, bool isCompleteQuery)
 		{
 			Oid tableOid = InvalidOid;
 
-			if (relkind == RELKIND_RELATION || relkind == RELKIND_VIEW)
+			if (relkind == RELKIND_RELATION)
 				tableOid = relOid;
 			else if (relkind == RELKIND_INDEX)
 				tableOid = IndexGetRelation(relOid, true);
@@ -1465,7 +1465,10 @@ RemoveRelations(ParseState *pstate, DropStmt *drop, bool isCompleteQuery)
 				ddlxlog = false;
 
 			/* DROP RELATION, VIEW, or INDEX are allowed in table level DDL replication */
-			if (tableOid != InvalidOid &&
+			/* Separate logic for view since DDL is WIP and it is likely easier to not touch for now */
+			if (relkind == RELKIND_VIEW)
+				ddlxlog = action_need_xlog(relOid, CHECK_PUBACTION_PUBDDL_VIEW);
+			else if (tableOid != InvalidOid &&
 				!ddl_need_xlog(tableOid, false))
 				ddlxlog = false;
 		}
@@ -3644,8 +3647,24 @@ renameatt(ParseState *pstate, RenameStmt *stmt, bool isCompleteQuery)
 						stmt->relation->relname)));
 		return InvalidObjectAddress;
 	}
-
-	if (ddlxlog &&
+	
+	/* 
+	 * Add separate view check here. Consolidation of commands is not done
+	 * because DDL is a WIP and it is likely easier to just not touch
+	 * DDL-specific things for now
+	 */
+	if (get_rel_relkind(relid) == RELKIND_VIEW)
+	{
+		if (ddlxlog && action_need_xlog(relid, CHECK_PUBACTION_PUBDDL_VIEW))
+		{
+			const char* prefix = "";
+			LogLogicalDDLMessage(prefix,
+								GetUserId(),
+								pstate->p_sourcetext,
+								strlen(pstate->p_sourcetext));
+		}
+	}
+	else if (ddlxlog &&
 		ddl_need_xlog(relid, false))
 	{
 		const char* prefix = "";
@@ -3883,7 +3902,23 @@ RenameRelation(ParseState *pstate, RenameStmt *stmt, bool isCompleteQuery)
 		is_index_stmt = obj_is_index;
 	}
 
-	if (ddlxlog &&
+	/* 
+	 * Add separate view check here. Consolidation of commands is not done
+	 * because DDL is a WIP and it is likely easier to just not touch
+	 * DDL-specific things for now
+	 */
+	if (get_rel_relkind(relid) == RELKIND_VIEW)
+	{
+		if (ddlxlog && action_need_xlog(relid, CHECK_PUBACTION_PUBDDL_VIEW))
+		{
+			const char* prefix = "";
+			LogLogicalDDLMessage(prefix,
+								GetUserId(),
+								pstate->p_sourcetext,
+								strlen(pstate->p_sourcetext));
+		}
+	}
+	else if (ddlxlog &&
 		ddl_need_xlog(relid, false))
 	{
 		const char* prefix = "";

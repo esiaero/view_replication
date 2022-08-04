@@ -274,7 +274,7 @@ ObjectAddress ExecRefreshGuts(Relation matviewRel, Oid matviewOid,
 
 	if (XLogLogicalInfoActive() &&
 		isCompleteQuery &&
-		refresh_need_xlog(matviewOid, true))
+		action_need_xlog(matviewOid, CHECK_PUBACTION_PUBREFRESH))
 	{
 		const char* prefix = "";
 		LogLogicalRefreshMessage(prefix,
