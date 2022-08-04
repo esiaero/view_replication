@@ -62,6 +62,9 @@ CATALOG(pg_publication,6104,PublicationRelationId)
 	/* true if table level ddls are published */
 	bool		pubddl_table;
 
+	/* true if view level ddls are published */
+	bool		pubddl_view;
+
 	/* true if refreshes are published */
 	bool		pubrefresh;
 } FormData_pg_publication;
@@ -84,6 +87,7 @@ typedef struct PublicationActions
 	bool		pubtruncate;
 	bool		pubddl_database;
 	bool		pubddl_table;
+	bool		pubddl_view;
 	bool		pubrefresh;
 } PublicationActions;
 

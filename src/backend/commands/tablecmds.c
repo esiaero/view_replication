@@ -1464,7 +1464,7 @@ RemoveRelations(ParseState *pstate, DropStmt *drop, bool isCompleteQuery)
 			else
 				ddlxlog = false;
 
-			/* DROP RELATION or INDEX are allowed in table level DDL replication */
+			/* DROP RELATION, VIEW, or INDEX are allowed in table level DDL replication */
 			if (tableOid != InvalidOid &&
 				!ddl_need_xlog(tableOid, false))
 				ddlxlog = false;

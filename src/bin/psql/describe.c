@@ -6050,7 +6050,7 @@ listPublications(const char *pattern)
 	PQExpBufferData buf;
 	PGresult   *res;
 	printQueryOpt myopt = pset.popt;
-	static const bool translate_columns[] = {false, false, false, false, false, false, false, false, false, false, false};
+	static const bool translate_columns[] = {false, false, false, false, false, false, false, false, false, false, false, false};
 
 	if (pset.sversion < 100000)
 	{
@@ -6097,6 +6097,9 @@ listPublications(const char *pattern)
 		appendPQExpBuffer(&buf,
 						  ",\n  pubddl_table AS \"%s\"",
 						  gettext_noop("Table level DDLs"));
+		appendPQExpBuffer(&buf,
+						  ",\n  pubddl_view AS \"%s\"",
+						  gettext_noop("View level DDLs"));
 	}
 
 	appendPQExpBufferStr(&buf,
@@ -6224,7 +6227,7 @@ describePublications(const char *pattern)
 	if (has_pubddl)
 	{
 		appendPQExpBufferStr(&buf,
-							 ", pubddl_database, pubddl_table");
+							 ", pubddl_database, pubddl_table, pubddl_view");
 	}
 	appendPQExpBufferStr(&buf,
 						 "\nFROM pg_catalog.pg_publication\n");
@@ -6277,7 +6280,7 @@ describePublications(const char *pattern)
 		if (has_pubviaroot)
 			ncols++;
 		if (has_pubddl)
-			ncols += 2;
+			ncols += 3;
 
 		initPQExpBuffer(&title);
 		printfPQExpBuffer(&title, _("Publication %s"), pubname);
@@ -6298,6 +6301,7 @@ describePublications(const char *pattern)
 		{
 			printTableAddHeader(&cont, gettext_noop("Database level DDL"), true, align);
 			printTableAddHeader(&cont, gettext_noop("Table level DDL"), true, align);
+			printTableAddHeader(&cont, gettext_noop("View level DDL"), true, align);
 		}
 
 		printTableAddCell(&cont, PQgetvalue(res, i, 2), false, false);
@@ -6315,6 +6319,7 @@ describePublications(const char *pattern)
 		{
 			printTableAddCell(&cont, PQgetvalue(res, i, 10), false, false);
 			printTableAddCell(&cont, PQgetvalue(res, i, 11), false, false);
+			printTableAddCell(&cont, PQgetvalue(res, i, 12), false, false);
 		}
 
 		if (!puballtables)

@@ -113,11 +113,13 @@ parse_publication_options(ParseState *pstate,
 	{
 		pubactions->pubddl_database = true;
 		pubactions->pubddl_table = true;
+		pubactions->pubddl_view = true;
 	}
 	else
 	{
 		pubactions->pubddl_database = false;
 		pubactions->pubddl_table = false;
+		pubactions->pubddl_view = false;
 	}
 
 	/* Parse options */
@@ -907,6 +909,8 @@ CreatePublication(ParseState *pstate, CreatePublicationStmt *stmt)
 		BoolGetDatum(pubactions.pubddl_database);
 	values[Anum_pg_publication_pubddl_table - 1] =
 		BoolGetDatum(pubactions.pubddl_table);
+	values[Anum_pg_publication_pubddl_view - 1] =
+		BoolGetDatum(pubactions.pubddl_view);
 	values[Anum_pg_publication_pubrefresh - 1] =
 		BoolGetDatum(pubactions.pubrefresh);
 
@@ -1144,6 +1148,9 @@ AlterPublicationOptions(ParseState *pstate, AlterPublicationStmt *stmt,
 
 		values[Anum_pg_publication_pubddl_table - 1] = BoolGetDatum(pubactions.pubddl_table);
 		replaces[Anum_pg_publication_pubddl_table - 1] = true;
+
+		values[Anum_pg_publication_pubddl_view - 1] = BoolGetDatum(pubactions.pubddl_view);
+		replaces[Anum_pg_publication_pubddl_view - 1] = true;
 	}
 
 	if (publish_via_partition_root_given)
